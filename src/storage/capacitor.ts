@@ -9,7 +9,7 @@ export interface EncryptionSecretProvider { getOrCreateSecret(): Promise<string>
 export interface AsyncSqliteDatabase {
   execute(sql: string): Promise<void>;
   run(sql: string, values?: readonly SqlValue[]): Promise<SqlRunResult>;
-  query<T extends Record<string, unknown>>(sql: string, values?: readonly SqlValue[]): Promise<readonly T[]>;
+  query<T extends object>(sql: string, values?: readonly SqlValue[]): Promise<readonly T[]>;
   transaction<T>(work: (db: AsyncSqliteDatabase) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
@@ -157,7 +157,7 @@ export async function applyAsyncMigrations(db: AsyncSqliteDatabase, migrations: 
       await tx.run("INSERT INTO schema_migrations(id, checksum, applied_at) VALUES(?,?,?)", [migration.id, checksum, new Date().toISOString()]);
     });
   }
-  return db.query<AppliedAsyncMigration>("SELECT id, checksum FROM schema_migrations ORDER BY id");
+  return [...await db.query<AppliedAsyncMigration>("SELECT id, checksum FROM schema_migrations ORDER BY id")];
 }
 
 interface EntryRow {
