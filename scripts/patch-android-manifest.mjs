@@ -7,7 +7,7 @@ const application = manifest.match(/<application\\b[^>]*>/s);
 if (!application) throw new Error("Android application manifest tag not found.");
 let tag = application[0];
 function setAttribute(name, value) {
-  const expression = new RegExp(name.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&") + '="[^"]*"');
+  const expression = new RegExp(name + '="[^"]*"');
   tag = expression.test(tag) ? tag.replace(expression, name + '="' + value + '"') : tag.replace(/>$/, " " + name + '="' + value + '">');
 }
 setAttribute("android:allowBackup", "false");
