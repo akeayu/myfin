@@ -6,10 +6,14 @@ import {
 
 function harness(initial: "old" | "new" = "old") {
   let active: "old" | "new" = initial;
+  let stored: "old" | "new" | null = initial;
   let pending = false;
   const sqlite: SqliteKeyRotationPort = {
-    changeEncryptionSecret: vi.fn(async () => { active = "new"; }),
-    verifyDatabaseKey: vi.fn(async ({ secret }) => ({ valid: secret === (active === "old" ? "old-key" : "new-key") }))
+    changeEncryptionSecret: vi.fn(async () => { active = "new"; stored = "new"; }),
+    verifyDatabaseKey: vi.fn(async ({ secret }) => ({ valid: secret === (active === "old" ? "old-key" : "new-key") })),
+    checkEncryptionSecret: vi.fn(async ({ passphrase }) => ({ result: stored === (passphrase === "old-key" ? "old" : "new") })),
+    clearEncryptionSecret: vi.fn(async () => { stored = null; }),
+    setEncryptionSecret: vi.fn(async ({ passphrase }) => { stored = passphrase === "old-key" ? "old" : "new"; })
   };
   const vault: KeyVaultRotationPort = {
     prepareDatabaseKeyRotation: vi.fn(async () => { pending = true; return { rotationId: "rotation-1", oldSecret: "old-key", newSecret: "new-key" }; }),
@@ -37,6 +41,18 @@ describe("MYFIN two-phase SQLCipher key rotation", () => {
       pending: true, rotationId: "rotation-1", oldSecret: "old-key", newSecret: "new-key"
     }));
     await expect(reconcilePendingMyfinKeyRotation(h.sqlite, h.vault, "myfin_test")).resolves.toBe("RECONCILED_COMMIT");
+    expect(h.vault.commitDatabaseKeyRotation).toHaveBeenCalledWith("rotation-1");
+  });
+
+  it("repairs the Capacitor secret store after a crash between SQLCipher rekey and preference update", async () => {
+    const h = harness("new");
+    h.vault.getPendingDatabaseKeyRotation = vi.fn(async () => ({
+      pending: true, rotationId: "rotation-1", oldSecret: "old-key", newSecret: "new-key"
+    }));
+    h.sqlite.checkEncryptionSecret = vi.fn(async () => ({ result: false }));
+    await expect(reconcilePendingMyfinKeyRotation(h.sqlite, h.vault, "myfin_test")).resolves.toBe("RECONCILED_COMMIT");
+    expect(h.sqlite.clearEncryptionSecret).toHaveBeenCalledOnce();
+    expect(h.sqlite.setEncryptionSecret).toHaveBeenCalledWith({ passphrase: "new-key" });
     expect(h.vault.commitDatabaseKeyRotation).toHaveBeenCalledWith("rotation-1");
   });
 
