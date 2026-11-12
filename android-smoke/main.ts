@@ -2,6 +2,8 @@ import { Capacitor } from "@capacitor/core";
 import { SQLiteConnection, CapacitorSQLite } from "@capacitor-community/sqlite";
 import { CapacitorSqliteDatabase } from "../src/storage/capacitor.js";
 import { AndroidKeystoreSecretProvider } from "../src/security/android-keystore.js";
+import { MyfinEncryptedBackupService, type SqliteBackupPort } from "../src/security/encrypted-backup.js";
+import { rotateMyfinDatabaseKey } from "../src/security/key-rotation.js";
 
 const status = document.querySelector<HTMLPreElement>("#status");
 function report(message: string): void {
@@ -55,9 +57,28 @@ async function run(): Promise<void> {
   if (inside.length !== 1 || inside[0]?.id !== "committed") fail("Transaction rollback did not preserve only the committed row.");
   await db.close();
 
+  await rotateMyfinDatabaseKey(plugin as unknown as Parameters<typeof rotateMyfinDatabaseKey>[0], encryptionSecretProvider);
+  const backupService = new MyfinEncryptedBackupService(
+    CapacitorSQLite as unknown as SqliteBackupPort,
+    encryptionSecretProvider
+  );
+
   db = await CapacitorSqliteDatabase.open({ database: dbName, encrypted: true });
   const reopened = await db.query<{ id: string; value: string }>("SELECT id,value FROM smoke_records");
-  if (reopened.length !== 1 || reopened[0]?.value !== "MYFIN_ANDROID_SMOKE_SENTINEL") fail("Encrypted database did not survive close/reopen.");
+  if (reopened.length !== 1 || reopened[0]?.value !== "MYFIN_ANDROID_SMOKE_SENTINEL") fail("Encrypted database did not survive rekey and reopen.");
+
+  const backupPassphrase = "synthetic-backup-passphrase-2026";
+  const backupText = await backupService.exportBackup(dbName, backupPassphrase);
+  if (!backupText.includes("MYFIN-ENCRYPTED-BACKUP")) fail("Encrypted backup envelope was not produced.");
+  await db.close();
+  await plugin.deleteDatabase({ database: dbName });
+  if ((await plugin.isDatabase({ database: dbName })).result) fail("Synthetic database deletion before restore failed.");
+  const restored = await backupService.restoreBackup(backupText, backupPassphrase);
+  if (restored.database !== dbName) fail("Encrypted backup restored under an unexpected database name.");
+
+  db = await CapacitorSqliteDatabase.open({ database: dbName, encrypted: true });
+  const afterRestore = await db.query<{ id: string; value: string }>("SELECT id,value FROM smoke_records");
+  if (afterRestore.length !== 1 || afterRestore[0]?.value !== "MYFIN_ANDROID_SMOKE_SENTINEL") fail("Encrypted backup restore did not preserve the synthetic record.");
   await db.close();
 
   const encrypted = (await plugin.isDatabaseEncrypted(dbName)).result;
