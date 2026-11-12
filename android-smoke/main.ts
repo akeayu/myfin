@@ -1,6 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { SQLiteConnection, CapacitorSQLite } from "@capacitor-community/sqlite";
 import { CapacitorSqliteDatabase } from "../src/storage/capacitor.js";
+import { AndroidKeystoreSecretProvider } from "../src/security/android-keystore.js";
 
 const status = document.querySelector<HTMLPreElement>("#status");
 function report(message: string): void {
@@ -15,10 +16,20 @@ function fail(message: string): never {
 async function run(): Promise<void> {
   if (Capacitor.getPlatform() !== "android") fail("Expected native Android platform.");
   const plugin = new SQLiteConnection(CapacitorSQLite);
-  const secret = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");
-  const encryptionSecretProvider = {
-    getOrCreateSecret: async (): Promise<string> => secret
-  };
+  const encryptionSecretProvider = new AndroidKeystoreSecretProvider();
+  const originalSecret = await encryptionSecretProvider.getOrCreateSecret();
+  const recoveryPassphrase = "synthetic-recovery-passphrase-2026";
+  const recoveryEnvelope = await encryptionSecretProvider.exportRecoveryEnvelope(recoveryPassphrase);
+  let wrongPassphraseRejected = false;
+  try {
+    await encryptionSecretProvider.restoreRecoveryEnvelope(recoveryEnvelope, "incorrect-recovery-passphrase");
+  } catch {
+    wrongPassphraseRejected = true;
+  }
+  if (!wrongPassphraseRejected) fail("Recovery envelope accepted an incorrect passphrase.");
+  await encryptionSecretProvider.restoreRecoveryEnvelope(recoveryEnvelope, recoveryPassphrase);
+  const restoredSecret = await encryptionSecretProvider.getOrCreateSecret();
+  if (restoredSecret !== originalSecret) fail("Recovery envelope did not restore the same database key.");
 
   const dbName = "myfin_android_smoke";
   let db = await CapacitorSqliteDatabase.open({
