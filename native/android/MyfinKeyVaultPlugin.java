@@ -225,9 +225,12 @@ public class MyfinKeyVaultPlugin extends Plugin {
         try {
             if (call.getInt("version", 0) != 1 || !"PBKDF2-HMAC-SHA256".equals(call.getString("kdf")) ||
                 call.getInt("iterations", 0) != PBKDF2_ITERATIONS) throw new IllegalArgumentException("Unsupported recovery envelope.");
+            if (passphrase.length < 12) throw new IllegalArgumentException("Recovery passphrase must contain at least 12 characters.");
             byte[] salt = Base64.decode(call.getString("salt"), Base64.NO_WRAP);
             byte[] iv = Base64.decode(call.getString("iv"), Base64.NO_WRAP);
             byte[] ciphertext = Base64.decode(call.getString("ciphertext"), Base64.NO_WRAP);
+            if (salt.length != 16 || iv.length != 12 || ciphertext.length != KEY_BYTES + 16)
+                throw new IllegalArgumentException("Invalid recovery envelope cryptographic field lengths.");
             spec = new PBEKeySpec(passphrase, salt, PBKDF2_ITERATIONS, 256);
             byte[] derived = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded();
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
