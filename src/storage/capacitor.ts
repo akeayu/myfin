@@ -14,7 +14,7 @@ export interface AsyncSqliteDatabase {
 
 type PluginValue = string | number | null | Blob | ArrayBuffer;
 function pluginValues(values: readonly SqlValue[] = []): PluginValue[] {
-  return values.map(value => typeof value === "bigint" ? value.toString() : value as PluginValue);
+  return values.map(value => typeof value === "bigint" ? value.toString() : value instanceof Uint8Array ? value.slice().buffer as ArrayBuffer : value as PluginValue);
 }
 
 /**
