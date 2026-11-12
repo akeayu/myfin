@@ -20,6 +20,7 @@ function makeHarness() {
     isDatabaseEncrypted: vi.fn(async () => ({ result: encrypted })),
     isSecretStored: vi.fn(async () => ({ result: secretStored })),
     setEncryptionSecret: vi.fn(async () => { secretStored = true; }),
+    isJsonValid: vi.fn(async () => ({ result: true })),
     importFromJson: vi.fn(async () => { exists = true; encrypted = true; return { changes: { changes: 1 } }; }),
     deleteDatabase: vi.fn(async () => { exists = false; })
   };
@@ -59,6 +60,16 @@ describe("MYFIN encrypted backup", () => {
     altered.ciphertext = altered.ciphertext.slice(0, -4) + "AAAA";
     await expect(target.service.restoreBackup(JSON.stringify(altered), "correct-horse-battery-staple")).rejects.toThrow();
     expect(target.sqlite.importFromJson).not.toHaveBeenCalled();
+  });
+
+  it("rejects a structurally invalid SQLite export before import", async () => {
+    const source = makeHarness();
+    const serialized = await source.service.exportBackup("myfin_test", "correct-horse-battery-staple");
+    const target = makeHarness();
+    (target.sqlite.isJsonValid as ReturnType<typeof vi.fn>).mockResolvedValue({ result: false });
+    await expect(target.service.restoreBackup(serialized, "correct-horse-battery-staple")).rejects.toThrow(/structure/);
+    expect(target.sqlite.importFromJson).not.toHaveBeenCalled();
+    expect(target.sqlite.deleteDatabase).not.toHaveBeenCalled();
   });
 
   it("never overwrites an existing database", async () => {
