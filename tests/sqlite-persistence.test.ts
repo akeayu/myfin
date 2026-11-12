@@ -74,6 +74,18 @@ describe("durable SQLite outbox", () => {
     await expect(store.insertIfAbsent(changed)).rejects.toThrow(/different command payload/i);
   });
 
+  it("supports outbox enqueue inside the caller's ledger transaction", async () => {
+    const commandValue = command();
+    native.exec("BEGIN IMMEDIATE");
+    expect(store.enqueueInCurrentTransaction(commandValue)).toBe("inserted");
+    native.exec("ROLLBACK");
+    expect(await store.getStatus("cmd-1")).toBeNull();
+    native.exec("BEGIN IMMEDIATE");
+    expect(store.enqueueInCurrentTransaction(commandValue)).toBe("inserted");
+    native.exec("COMMIT");
+    expect(await store.getStatus("cmd-1")).toMatchObject({status:"pending",attempts:0});
+  });
+
   it("claims atomically, acknowledges receipts, and stops redelivery", async () => {
     await store.insertIfAbsent(command());
     const claimed = await store.claimNext(new Date("2026-11-12T10:00:00Z"));
