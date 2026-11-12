@@ -35,7 +35,8 @@ CREATE TABLE journal_entries (
   reverses_entry_id TEXT REFERENCES journal_entries(id),
   UNIQUE(entity_id, idempotency_key),
   CHECK((status = 'draft' AND posted_at IS NULL AND content_hash IS NULL)
-     OR (status = 'posted' AND posted_at IS NOT NULL AND length(content_hash) = 64))
+     OR (status = 'posted' AND posted_at IS NOT NULL AND length(content_hash) = 64
+         AND content_hash NOT GLOB '*[^0-9a-fA-F]*'))
 );
 
 CREATE TABLE journal_lines (
@@ -112,6 +113,7 @@ BEGIN SELECT RAISE(ABORT, 'cannot add lines to a posted journal'); END;
 CREATE TRIGGER posted_line_no_update
 BEFORE UPDATE ON journal_lines
 WHEN (SELECT status FROM journal_entries WHERE id = OLD.journal_entry_id) = 'posted'
+  OR (SELECT status FROM journal_entries WHERE id = NEW.journal_entry_id) = 'posted'
 BEGIN SELECT RAISE(ABORT, 'posted journal lines are immutable'); END;
 
 CREATE TRIGGER posted_line_no_delete
