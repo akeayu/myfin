@@ -4,6 +4,8 @@ import type { LedgerRepository, LedgerTransaction } from "../ledger/posting-serv
 
 export type SqlValue = string | number | bigint | null | Uint8Array;
 export interface SqlRunResult { readonly changes: number; readonly lastId?: number; }
+export interface EncryptionSecretProvider { getOrCreateSecret(): Promise<string>; }
+
 export interface AsyncSqliteDatabase {
   execute(sql: string): Promise<void>;
   run(sql: string, values?: readonly SqlValue[]): Promise<SqlRunResult>;
@@ -45,7 +47,7 @@ export class CapacitorSqliteDatabase implements AsyncSqliteDatabase {
     database: string;
     encrypted: boolean;
     mode?: "encryption" | "secret" | "newsecret";
-    initializeEncryptionSecret?: (sqlite: SQLiteConnection) => Promise<void>;
+    encryptionSecretProvider?: EncryptionSecretProvider;
     version?: number;
     readonly?: boolean;
   }): Promise<CapacitorSqliteDatabase> {
@@ -54,11 +56,14 @@ export class CapacitorSqliteDatabase implements AsyncSqliteDatabase {
     const consistent = (await sqlite.checkConnectionsConsistency()).result;
     const exists = (await sqlite.isConnection(options.database, options.readonly ?? false)).result;
     if (options.encrypted) {
+      if (!(await sqlite.isInConfigEncryption()).result) throw new Error("Capacitor SQLite encryption is disabled in capacitor.config.");
       const secretStored = (await sqlite.isSecretStored()).result;
       if (!secretStored) {
-        if (!options.initializeEncryptionSecret) throw new Error("Encrypted MYFIN storage requires a secret provisioned by the approved platform key manager.");
-        await options.initializeEncryptionSecret(sqlite);
-        if (!(await sqlite.isSecretStored()).result) throw new Error("The platform key manager did not provision the SQLite encryption secret.");
+        if (!options.encryptionSecretProvider) throw new Error("Encrypted MYFIN storage requires an Android Keystore-backed encryption secret provider.");
+        const secret = await options.encryptionSecretProvider.getOrCreateSecret();
+        if (secret.length < 32) throw new Error("The encryption secret provider returned an insufficient secret.");
+        await sqlite.setEncryptionSecret(secret);
+        if (!(await sqlite.isSecretStored()).result) throw new Error("The SQLite plugin did not persist the provisioned encryption secret.");
       }
     }
     const connection = consistent && exists
