@@ -18,6 +18,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 import android.content.SharedPreferences;
+import net.zetetic.database.sqlcipher.SQLiteDatabase;
 
 @CapacitorPlugin(name = "MyfinKeyVault")
 public class MyfinKeyVaultPlugin extends Plugin {
@@ -88,6 +89,36 @@ public class MyfinKeyVaultPlugin extends Plugin {
             ret.put("secret", Base64.encodeToString(activeKey(), Base64.NO_WRAP));
             call.resolve(ret);
         } catch (Exception e) { call.reject("MYFIN Keystore key unavailable.", e); }
+    }
+
+    @PluginMethod
+    public void verifyDatabaseKey(PluginCall call) {
+        SQLiteDatabase database = null;
+        try {
+            String name = call.getString("database", "");
+            String secret = call.getString("secret", "");
+            if (!name.matches("[a-zA-Z0-9_-]{1,64}") || secret.isEmpty())
+                throw new IllegalArgumentException("Invalid MYFIN database verification request.");
+            java.io.File file = getContext().getDatabasePath(name + "SQLite.db");
+            if (!file.isFile()) throw new java.io.FileNotFoundException("MYFIN database file does not exist.");
+            System.loadLibrary("sqlcipher");
+            database = SQLiteDatabase.openDatabase(
+                file.getAbsolutePath(), secret, null, SQLiteDatabase.OPEN_READONLY, null
+            );
+            if (!database.isOpen()) throw new IllegalStateException("SQLCipher did not open the database.");
+            database.getVersion();
+            try (android.database.Cursor cursor = database.rawQuery("PRAGMA cipher_integrity_check", null)) {
+                if (!cursor.moveToFirst() || !"ok".equalsIgnoreCase(cursor.getString(0)))
+                    throw new IllegalStateException("SQLCipher integrity check did not return ok.");
+            }
+            JSObject ret = new JSObject();
+            ret.put("valid", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("SQLCipher database-key verification failed.", e);
+        } finally {
+            if (database != null) database.close();
+        }
     }
 
     @PluginMethod
