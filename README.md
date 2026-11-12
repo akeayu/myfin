@@ -18,8 +18,10 @@ npm run check
 - `src/calendar/ethiopian.ts`: E.C./G.C. date-only conversion, Pagume, leap years and month arithmetic.
 - `src/ledger/ledger.ts`: balanced journals, posted-entry invariants and reversal validation.
 - `src/ledger/posting-service.ts`: transactional posting contract, idempotency and canonical SHA-256 content hashes.
-- `migrations/001_finance_and_outbox.sql`: SQLite ledger/outbox schema, balance-on-posting and immutability triggers.
-- `src/offline/outbox.ts`: durable-outbox interface, idempotency and version-conflict classification.
+- `migrations/001_finance_and_outbox.sql` and `002_outbox_leases.sql`: checksum-tracked SQLite schema migrations, balance-on-posting and immutability triggers, plus outbox leases.
+- `src/storage/sqlite.ts`: SQLite migration runner and transactional ledger repository adapter.
+- `src/offline/outbox.ts` and `src/offline/sqlite-outbox.ts`: durable SQLite outbox, atomic leases, idempotent enqueue, retry/backoff and worker.
+- `tests/sqlite-persistence.test.ts`: real SQLite migration, posting, rollback, immutability and outbox integration tests (execution pending).
 - `src/integration/iroka-contract.ts`: verified-token interface, scoped IROKA access and owner-approved proposals.
 - `src/security/production-gates.ts`: fail-closed production security gate evaluator.
 
