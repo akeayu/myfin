@@ -1,7 +1,7 @@
 # MYFIN
 
-MYFIN is a personal-finance application foundation. It is separate from ARNA/MASES.
-This A3 branch establishes domain contracts and an initial SQLite schema migration.
+MYFIN is a personal-finance application foundation, separate from ARNA/MASES.
+This A3 branch establishes the first governed financial domain and persistence contracts.
 
 ## Local verification
 
@@ -15,14 +15,15 @@ npm run check
 ## A3 modules
 
 - `src/domain/money.ts`: integer-minor-unit money arithmetic.
-- `src/calendar/ethiopian.ts`: Ethiopian/Gregorian date-only conversion, Pagume and month arithmetic.
-- `src/ledger/ledger.ts`: balanced journal validation, posted-entry shape and reversal checks.
-- `migrations/001_finance_and_outbox.sql`: SQLite schema, posting-balance trigger, immutable posted records and durable outbox table.
-- `src/offline/outbox.ts`: persistence contract, idempotency and conflict classification.
-- `src/integration/iroka-contract.ts`: scoped read/proposal authorization boundary.
+- `src/calendar/ethiopian.ts`: E.C./G.C. date-only conversion, Pagume, leap years and month arithmetic.
+- `src/ledger/ledger.ts`: balanced journals, posted-entry invariants and reversal validation.
+- `src/ledger/posting-service.ts`: transactional posting contract, idempotency and canonical SHA-256 content hashes.
+- `migrations/001_finance_and_outbox.sql`: SQLite ledger/outbox schema, balance-on-posting and immutability triggers.
+- `src/offline/outbox.ts`: durable-outbox interface, idempotency and version-conflict classification.
+- `src/integration/iroka-contract.ts`: verified-token interface, scoped IROKA access and owner-approved proposals.
 - `src/security/production-gates.ts`: fail-closed production security gate evaluator.
 
-## Non-negotiable safety limits
+## Safety limits
 
 Synthetic data only. Do not enter real financial data. The Android encryption failure,
 Keystore lifecycle, WAL/journal/temp-file encryption, encrypted backup, recovery,
