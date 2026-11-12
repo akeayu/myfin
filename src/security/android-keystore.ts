@@ -14,6 +14,8 @@ export interface RecoveryEnvelopeV1 {
 
 interface NativeKeyVault {
   getOrCreateDatabaseKey(options: { database: string }): Promise<{ secret: string }>;
+  verifyMissingKeyFailsClosed(options: { database: string }): Promise<{ protected: boolean }>;
+  getKeystoreDiagnostics(): Promise<{ insideSecureHardware: boolean; securityLevel: string; strongBoxBacked: boolean; androidApi: number; deviceModel: string }>;
   exportRecoveryEnvelope(options: { passphrase: string; database: string }): Promise<RecoveryEnvelopeV1>;
   restoreRecoveryEnvelope(options: RecoveryEnvelopeV1 & { passphrase: string; database: string }): Promise<void>;
   prepareDatabaseKeyRotation(options: { database: string }): Promise<{ rotationId: string; oldSecret: string; newSecret: string }>;
@@ -70,6 +72,17 @@ export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
     requireAndroid();
     if (passphrase.length < 12) throw new Error("Use a recovery passphrase of at least 12 characters.");
     return nativeVault.exportRecoveryEnvelope({ passphrase, database });
+  }
+
+  async verifyMissingKeyFailsClosed(database: string): Promise<boolean> {
+    requireAndroid();
+    const result = await nativeVault.verifyMissingKeyFailsClosed({ database });
+    return result.protected === true;
+  }
+
+  async getKeystoreDiagnostics(): Promise<{ insideSecureHardware: boolean; securityLevel: string; strongBoxBacked: boolean; androidApi: number; deviceModel: string }> {
+    requireAndroid();
+    return nativeVault.getKeystoreDiagnostics();
   }
 
   async verifyDatabaseKey(database: string, secret: string): Promise<boolean> {
