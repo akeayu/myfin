@@ -9,7 +9,7 @@ function harness(initial: "old" | "new" = "old") {
   let pending = false;
   const sqlite: SqliteKeyRotationPort = {
     changeEncryptionSecret: vi.fn(async () => { active = "new"; }),
-    checkEncryptionSecret: vi.fn(async ({ passphrase }) => ({ result: passphrase === (active === "old" ? "old-key" : "new-key") }))
+    verifyDatabaseKey: vi.fn(async ({ secret }) => ({ valid: secret === (active === "old" ? "old-key" : "new-key") }))
   };
   const vault: KeyVaultRotationPort = {
     prepareDatabaseKeyRotation: vi.fn(async () => { pending = true; return { rotationId: "rotation-1", oldSecret: "old-key", newSecret: "new-key" }; }),
@@ -25,7 +25,7 @@ function harness(initial: "old" | "new" = "old") {
 describe("MYFIN two-phase SQLCipher key rotation", () => {
   it("rekeys, verifies the new secret, then commits the Keystore key", async () => {
     const h = harness();
-    await expect(rotateMyfinDatabaseKey(h.sqlite, h.vault)).resolves.toBe("ROTATED");
+    await expect(rotateMyfinDatabaseKey(h.sqlite, h.vault, "myfin_test")).resolves.toBe("ROTATED");
     expect(h.sqlite.changeEncryptionSecret).toHaveBeenCalledWith({ passphrase: "new-key", oldpassphrase: "old-key" });
     expect(h.vault.commitDatabaseKeyRotation).toHaveBeenCalledWith("rotation-1");
     expect(h.state()).toEqual({ active: "new", pending: false });
@@ -36,7 +36,7 @@ describe("MYFIN two-phase SQLCipher key rotation", () => {
     h.vault.getPendingDatabaseKeyRotation = vi.fn(async () => ({
       pending: true, rotationId: "rotation-1", oldSecret: "old-key", newSecret: "new-key"
     }));
-    await expect(reconcilePendingMyfinKeyRotation(h.sqlite, h.vault)).resolves.toBe("RECONCILED_COMMIT");
+    await expect(reconcilePendingMyfinKeyRotation(h.sqlite, h.vault, "myfin_test")).resolves.toBe("RECONCILED_COMMIT");
     expect(h.vault.commitDatabaseKeyRotation).toHaveBeenCalledWith("rotation-1");
   });
 
@@ -52,7 +52,7 @@ describe("MYFIN two-phase SQLCipher key rotation", () => {
   it("preserves the pending journal if neither key authenticates", async () => {
     const h = harness();
     h.sqlite.changeEncryptionSecret = vi.fn(async () => { h.state(); });
-    h.sqlite.checkEncryptionSecret = vi.fn(async () => ({ result: false }));
+    h.sqlite.verifyDatabaseKey = vi.fn(async () => ({ valid: false }));
     await expect(rotateMyfinDatabaseKey(h.sqlite, h.vault)).rejects.toThrow(/unresolved/);
     expect(h.vault.abortDatabaseKeyRotation).not.toHaveBeenCalled();
     expect(h.vault.commitDatabaseKeyRotation).not.toHaveBeenCalled();
