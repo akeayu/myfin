@@ -4,7 +4,11 @@ import type { LedgerRepository, LedgerTransaction } from "../ledger/posting-serv
 
 export type SqlValue = string | number | bigint | null | Uint8Array;
 export interface SqlRunResult { readonly changes: number; readonly lastId?: number; }
-export interface EncryptionSecretProvider { getOrCreateSecret(): Promise<string>; }
+export interface EncryptionSecretProvider {
+  getOrCreateSecret(): Promise<string>;
+  /** Reconcile interrupted key rotation before any encrypted database connection is opened. */
+  prepareForDatabaseOpen?(database: string): Promise<void>;
+}
 
 export interface AsyncSqliteDatabase {
   execute(sql: string): Promise<void>;
@@ -52,6 +56,9 @@ export class CapacitorSqliteDatabase implements AsyncSqliteDatabase {
     readonly?: boolean;
   }): Promise<CapacitorSqliteDatabase> {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(options.database)) throw new Error("Invalid MYFIN database name.");
+    if (options.encrypted && options.encryptionSecretProvider?.prepareForDatabaseOpen) {
+      await options.encryptionSecretProvider.prepareForDatabaseOpen(options.database);
+    }
     const sqlite = new SQLiteConnection((await import("@capacitor-community/sqlite")).CapacitorSQLite);
     const consistent = (await sqlite.checkConnectionsConsistency()).result;
     const exists = (await sqlite.isConnection(options.database, options.readonly ?? false)).result;
