@@ -18,6 +18,8 @@ interface NativeKeyVault {
   getPendingDatabaseKeyRotation(): Promise<{ pending: boolean; rotationId?: string; oldSecret?: string; newSecret?: string }>;
   commitDatabaseKeyRotation(options: { rotationId: string }): Promise<void>;
   abortDatabaseKeyRotation(options: { rotationId: string }): Promise<void>;
+  writeSmokeBackupFile(options: { content: string }): Promise<{ saved: boolean }>;
+  readSmokeBackupFile(): Promise<{ content: string | null }>;
 }
 
 const nativeVault = registerPlugin<NativeKeyVault>("MyfinKeyVault");
@@ -45,6 +47,17 @@ export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
     requireAndroid();
     if (passphrase.length < 12) throw new Error("Use a recovery passphrase of at least 12 characters.");
     return nativeVault.exportRecoveryEnvelope({ passphrase });
+  }
+
+  async writeSmokeBackupFile(content: string): Promise<void> {
+    requireAndroid();
+    const result = await nativeVault.writeSmokeBackupFile({ content });
+    if (!result.saved) throw new Error("Android did not persist the encrypted MYFIN smoke backup.");
+  }
+
+  async readSmokeBackupFile(): Promise<string | null> {
+    requireAndroid();
+    return (await nativeVault.readSmokeBackupFile()).content;
   }
 
   async prepareDatabaseKeyRotation(): Promise<{ rotationId: string; oldSecret: string; newSecret: string }> {
