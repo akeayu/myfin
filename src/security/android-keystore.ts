@@ -20,6 +20,7 @@ interface NativeKeyVault {
   abortDatabaseKeyRotation(options: { rotationId: string }): Promise<void>;
   writeSmokeBackupFile(options: { content: string }): Promise<{ saved: boolean }>;
   readSmokeBackupFile(): Promise<{ content: string | null }>;
+  verifyDatabaseKey(options: { database: string; secret: string }): Promise<{ valid: boolean }>;
 }
 
 const nativeVault = registerPlugin<NativeKeyVault>("MyfinKeyVault");
@@ -47,6 +48,12 @@ export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
     requireAndroid();
     if (passphrase.length < 12) throw new Error("Use a recovery passphrase of at least 12 characters.");
     return nativeVault.exportRecoveryEnvelope({ passphrase });
+  }
+
+  async verifyDatabaseKey(database: string, secret: string): Promise<boolean> {
+    requireAndroid();
+    const result = await nativeVault.verifyDatabaseKey({ database, secret });
+    return result.valid === true;
   }
 
   async writeSmokeBackupFile(content: string): Promise<void> {
