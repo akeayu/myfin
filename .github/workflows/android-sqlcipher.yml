@@ -44,6 +44,13 @@ jobs:
         run: |
           chmod +x android/gradlew
           ./android/gradlew -p android app:assembleDebug
+      - name: Upload synthetic Android APK for physical-device verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: myfin-android-storage-smoke-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
       - name: Run encrypted SQLite tests on Android emulator
         timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
