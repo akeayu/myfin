@@ -1,0 +1,1 @@
+{"name":"myfin-core","private":true,"version":"0.1.0","type":"module","description":"MYFIN governed personal-finance domain foundation","scripts":{"typecheck":"tsc --noEmit","test":"vitest run","check":"npm run typecheck && npm test"},"devDependencies":{"typescript":"^5.9.3","vitest":"^3.2.4"},"engines":{"node":">=22"}}
