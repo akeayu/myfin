@@ -61,7 +61,7 @@ describe("MYFIN two-phase SQLCipher key rotation", () => {
     h.vault.getPendingDatabaseKeyRotation = vi.fn(async () => ({
       pending: true, rotationId: "rotation-1", oldSecret: "old-key", newSecret: "new-key"
     }));
-    await expect(reconcilePendingMyfinKeyRotation(h.sqlite, h.vault)).resolves.toBe("RECONCILED_ABORT");
+    await expect(reconcilePendingMyfinKeyRotation(h.sqlite, h.vault, "myfin_test")).resolves.toBe("RECONCILED_ABORT");
     expect(h.vault.abortDatabaseKeyRotation).toHaveBeenCalledWith("rotation-1");
   });
 
@@ -69,7 +69,7 @@ describe("MYFIN two-phase SQLCipher key rotation", () => {
     const h = harness();
     h.sqlite.changeEncryptionSecret = vi.fn(async () => { h.state(); });
     h.sqlite.verifyDatabaseKey = vi.fn(async () => ({ valid: false }));
-    await expect(rotateMyfinDatabaseKey(h.sqlite, h.vault)).rejects.toThrow(/unresolved/);
+    await expect(rotateMyfinDatabaseKey(h.sqlite, h.vault, "myfin_test")).rejects.toThrow(/unresolved/);
     expect(h.vault.abortDatabaseKeyRotation).not.toHaveBeenCalled();
     expect(h.vault.commitDatabaseKeyRotation).not.toHaveBeenCalled();
   });
