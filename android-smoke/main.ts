@@ -21,7 +21,7 @@ async function run(): Promise<void> {
     isDatabaseEncrypted(options: { database: string }): Promise<{ result: boolean }>;
     isDatabase(options: { database: string }): Promise<{ result: boolean }>;
     deleteDatabase(options: { database: string }): Promise<void>;
-    checkEncryptionSecret(options: { passphrase: string }): Promise<{ result: boolean }>;
+    verifyDatabaseKey(options: { database: string; secret: string }): Promise<{ valid: boolean }>;
   };
   const keyVault = new AndroidKeystoreSecretProvider();
   const backupService = new MyfinEncryptedBackupService(sqlite, keyVault);
@@ -74,11 +74,11 @@ async function run(): Promise<void> {
   if (inside.length !== 1 || inside[0]?.id !== "committed") fail("Transaction rollback did not preserve only the committed row.");
   await db.close();
 
-  await rotateMyfinDatabaseKey(sqlite, keyVault);
+  await rotateMyfinDatabaseKey(sqlite, keyVault, dbName);
   const rotatedSecret = await keyVault.getOrCreateSecret();
   if (rotatedSecret === originalSecret) fail("Keystore database key did not change during rotation.");
-  if ((await sqlite.checkEncryptionSecret({ passphrase: originalSecret })).result) fail("Old SQLCipher key still authenticates after rotation.");
-  if (!(await sqlite.checkEncryptionSecret({ passphrase: rotatedSecret })).result) fail("New SQLCipher key does not authenticate after rotation.");
+  if (await keyVault.verifyDatabaseKey(dbName, originalSecret)) fail("Old SQLCipher key still opens the database after rotation.");
+  if (!(await keyVault.verifyDatabaseKey(dbName, rotatedSecret))) fail("New SQLCipher key does not open and integrity-check the database after rotation.");
   db = await CapacitorSqliteDatabase.open({ database: dbName, encrypted: true, encryptionSecretProvider: keyVault });
   const reopened = await db.query<{ id: string; value: string }>("SELECT id,value FROM smoke_records");
   if (reopened.length !== 1 || reopened[0]?.value !== "MYFIN_ANDROID_SMOKE_SENTINEL") fail("Encrypted database did not survive SQLCipher rekey and reopen.");
