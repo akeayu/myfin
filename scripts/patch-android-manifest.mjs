@@ -24,11 +24,10 @@ const nativeDependencies = [
   "    implementation 'net.zetetic:sqlcipher-android:4.17.0@aar'",
   '    implementation "androidx.sqlite:sqlite:2.4.0"'
 ];
-if (!appGradle.includes("net.zetetic:sqlcipher-android:4.17.0") ||
-    !appGradle.includes("androidx.sqlite:sqlite:2.4.0")) {
+const missingNativeDependencies = nativeDependencies.filter(line => !appGradle.includes(line));
+if (missingNativeDependencies.length > 0) {
   if (!/dependencies\s*\{/.test(appGradle)) throw new Error("Android app dependencies block not found.");
-  const missing = nativeDependencies.filter(line => !appGradle.includes(line.split(":").slice(0, 2).join(":")));
-  appGradle = appGradle.replace(/dependencies\s*\{/, match => match + "\n" + nativeDependencies.join("\n"));
+  appGradle = appGradle.replace(/dependencies\s*\{/, match => match + "\n" + missingNativeDependencies.join("\n"));
   await writeFile(appGradlePath, appGradle);
 }
 
