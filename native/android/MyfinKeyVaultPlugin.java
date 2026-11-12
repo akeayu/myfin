@@ -153,6 +153,48 @@ public class MyfinKeyVaultPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void writeSmokeBackupFile(PluginCall call) {
+        try {
+            String content = call.getString("content", "");
+            if (content.length() < 64 || content.length() > 100000000)
+                throw new IllegalArgumentException("Invalid MYFIN smoke backup size.");
+            java.io.File file = new java.io.File(getContext().getFilesDir(), "myfin-smoke-backup.json");
+            try (java.io.FileOutputStream output = new java.io.FileOutputStream(file, false)) {
+                output.write(content.getBytes(StandardCharsets.UTF_8));
+                output.getFD().sync();
+            }
+            JSObject ret = new JSObject();
+            ret.put("saved", true);
+            call.resolve(ret);
+        } catch (Exception e) { call.reject("Unable to stage encrypted MYFIN smoke backup.", e); }
+    }
+
+    @PluginMethod
+    public void readSmokeBackupFile(PluginCall call) {
+        try {
+            java.io.File file = new java.io.File(getContext().getFilesDir(), "myfin-smoke-backup.json");
+            JSObject ret = new JSObject();
+            if (!file.isFile()) {
+                ret.put("content", (String) null);
+            } else {
+                long length = file.length();
+                if (length < 64 || length > 100000000) throw new IllegalStateException("Staged MYFIN smoke backup has an invalid size.");
+                byte[] bytes = new byte[(int) length];
+                try (java.io.FileInputStream input = new java.io.FileInputStream(file)) {
+                    int offset = 0;
+                    while (offset < bytes.length) {
+                        int read = input.read(bytes, offset, bytes.length - offset);
+                        if (read < 0) throw new java.io.EOFException("Unexpected end of staged backup file.");
+                        offset += read;
+                    }
+                }
+                ret.put("content", new String(bytes, StandardCharsets.UTF_8));
+            }
+            call.resolve(ret);
+        } catch (Exception e) { call.reject("Unable to read staged encrypted MYFIN smoke backup.", e); }
+    }
+
+    @PluginMethod
     public void exportRecoveryEnvelope(PluginCall call) {
         char[] passphrase = call.getString("passphrase", "").toCharArray();
         if (passphrase.length < 12) { call.reject("Recovery passphrase must contain at least 12 characters."); return; }
