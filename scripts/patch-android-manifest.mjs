@@ -17,7 +17,16 @@ if (!activity.includes("MyfinKeyVaultPlugin.class")) {
 }
 
 
-const manifestPath = "android/app/src/main/AndroidManifest.xml";
+
+const appGradlePath = "android/app/build.gradle";
+let appGradle = await readFile(appGradlePath, "utf8");
+const sqlcipherDependency = "    implementation 'net.zetetic:sqlcipher-android:4.17.0@aar'";
+if (!appGradle.includes("net.zetetic:sqlcipher-android:4.17.0")) {
+  if (!/dependencies\\s*\\{/.test(appGradle)) throw new Error("Android app dependencies block not found.");
+  appGradle = appGradle.replace(/dependencies\\s*\\{/, match => match + "\\n" + sqlcipherDependency);
+  await writeFile(appGradlePath, appGradle);
+}
+\nconst manifestPath = "android/app/src/main/AndroidManifest.xml";
 let manifest = await readFile(manifestPath, "utf8");
 const application = manifest.match(/<application\b[^>]*>/s);
 if (!application) throw new Error("Android application manifest tag not found.");
