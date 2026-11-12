@@ -49,7 +49,7 @@ describe("MYFIN two-phase SQLCipher key rotation", () => {
     h.vault.getPendingDatabaseKeyRotation = vi.fn(async () => ({
       pending: true, rotationId: "rotation-1", oldSecret: "old-key", newSecret: "new-key"
     }));
-    h.sqlite.checkEncryptionSecret = vi.fn(async () => ({ result: false }));
+    h.sqlite.checkEncryptionSecret = vi.fn(async () => { throw new Error("no passphrase stored"); });
     await expect(reconcilePendingMyfinKeyRotation(h.sqlite, h.vault, "myfin_test")).resolves.toBe("RECONCILED_COMMIT");
     expect(h.sqlite.clearEncryptionSecret).toHaveBeenCalledOnce();
     expect(h.sqlite.setEncryptionSecret).toHaveBeenCalledWith({ passphrase: "new-key" });
