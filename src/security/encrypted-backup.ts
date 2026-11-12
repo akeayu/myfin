@@ -14,6 +14,7 @@ export interface SqliteBackupPort {
   isDatabaseEncrypted(options: { database: string }): Promise<{ result: boolean }>;
   isSecretStored(): Promise<{ result: boolean }>;
   setEncryptionSecret(options: { passphrase: string }): Promise<void>;
+  isJsonValid(options: { jsonstring: string }): Promise<{ result: boolean }>;
   importFromJson(options: { jsonstring: string }): Promise<{ changes?: { changes?: number } }>;
   deleteDatabase(options: { database: string }): Promise<void>;
 }
@@ -143,7 +144,11 @@ export class MyfinEncryptedBackupService {
 
     try {
       const importObject = { ...payload.sqliteExport, database, overwrite: false, encrypted: true };
-      const imported = await this.sqlite.importFromJson({ jsonstring: JSON.stringify(importObject) });
+      const importJson = JSON.stringify(importObject);
+      if (!(await this.sqlite.isJsonValid({ jsonstring: importJson })).result) {
+        throw new Error("SQLite rejected the backup structure during pre-import validation.");
+      }
+      const imported = await this.sqlite.importFromJson({ jsonstring: importJson });
       if ((imported.changes?.changes ?? 0) < 0) throw new Error("SQLite rejected the encrypted backup import.");
       if (!(await this.sqlite.isDatabase({ database })).result) throw new Error("Imported database was not created.");
       if (!(await this.sqlite.isDatabaseEncrypted({ database })).result) throw new Error("Imported database is not encrypted.");
