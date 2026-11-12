@@ -122,7 +122,7 @@ export class MyfinEncryptedBackupService {
     requirePassphrase(passphrase);
     const result = await this.sqlite.exportToJson({ database, jsonexportmode: "full", encrypted: true });
     if (!result.export || typeof result.export !== "object") throw new Error("SQLite did not return a full database export.");
-    const recovery = await this.keyVault.exportRecoveryEnvelope(passphrase);
+    const recovery = await this.keyVault.exportRecoveryEnvelope(passphrase, database);
     const backup: BackupPayloadV1 = {
       magic: BACKUP_MAGIC, version: BACKUP_VERSION, database,
       createdAt: new Date().toISOString(), recovery, sqliteExport: result.export
@@ -144,8 +144,8 @@ export class MyfinEncryptedBackupService {
       throw new Error("Restore refused: a database with this name already exists. Use a separately reviewed replacement workflow.");
     }
 
-    await this.keyVault.restoreRecoveryEnvelope(payload.recovery, passphrase);
-    const secret = await this.keyVault.getOrCreateSecret();
+    await this.keyVault.restoreRecoveryEnvelope(payload.recovery, passphrase, database);
+    const secret = await this.keyVault.getOrCreateSecret(database);
     if (!(await this.sqlite.isSecretStored()).result) await this.sqlite.setEncryptionSecret({ passphrase: secret });
 
     try {
