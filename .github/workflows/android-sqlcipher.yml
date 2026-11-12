@@ -1,0 +1,65 @@
+name: MYFIN Android SQLite verification
+on:
+  push:
+    branches:
+      - feat/a3-financial-calendar-offline-iroka-foundation
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+concurrency:
+  group: myfin-android-sqlcipher-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  android-sqlcipher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run type and unit tests
+        run: npm run check
+      - name: Build Android smoke application
+        run: npm run build:android-smoke
+      - name: Generate Capacitor Android project
+        run: npx cap add android
+      - name: Disable automatic Android app-data backup
+        run: node scripts/patch-android-manifest.mjs
+      - name: Sync native Capacitor plugins
+        run: npx cap sync android
+      - name: Build debug APK
+        run: |
+          chmod +x android/gradlew
+          ./android/gradlew -p android app:assembleDebug
+      - name: Upload synthetic Android APK for physical-device verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: myfin-android-storage-smoke-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Run encrypted SQLite tests on Android emulator
+        timeout-minutes: 25
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-boot-timeout: 900
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/verify-android-smoke.sh
