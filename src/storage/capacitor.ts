@@ -93,7 +93,7 @@ export class CapacitorSqliteDatabase implements AsyncSqliteDatabase {
     return { changes, ...(result.changes?.lastId === undefined ? {} : { lastId: result.changes.lastId }) };
   }
 
-  async query<T extends Record<string, unknown>>(sql: string, values: readonly SqlValue[] = []): Promise<readonly T[]> {
+  async query<T extends object>(sql: string, values: readonly SqlValue[] = []): Promise<readonly T[]> {
     this.assertOpen();
     const result = await this.connection.query(sql, pluginValues(values));
     return (result.values ?? []) as T[];
