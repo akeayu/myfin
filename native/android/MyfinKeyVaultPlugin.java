@@ -128,6 +128,14 @@ public class MyfinKeyVaultPlugin extends Plugin {
             cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(derived, "AES"), new GCMParameterSpec(GCM_TAG_BITS, iv));
             byte[] key = cipher.doFinal(ciphertext);
             if (key.length != KEY_BYTES) throw new IllegalArgumentException("Invalid recovered database key.");
+            String current = prefs().getString(ACTIVE, null);
+            if (current != null) {
+                byte[] currentKey = unwrap(Base64.decode(current, Base64.NO_WRAP));
+                if (!java.security.MessageDigest.isEqual(currentKey, key))
+                    throw new IllegalStateException("A different local database key already exists. Restore the encrypted database and key together through the staged restore workflow.");
+                call.resolve();
+                return;
+            }
             String wrapped = Base64.encodeToString(wrap(key), Base64.NO_WRAP);
             if (!prefs().edit().putString(ACTIVE, wrapped).commit()) throw new IllegalStateException("Unable to persist recovered key.");
             call.resolve();
