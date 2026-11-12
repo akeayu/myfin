@@ -4,6 +4,8 @@ export interface LedgerTransaction {
   assertAccountsBelongToEntity(entityId:string,accountLines:readonly {accountId:string;currency:string}[]):Promise<void>;
   /** Must rely on database uniqueness constraints and commit atomically. */
   insertPostedEntry(entry:PostedJournalEntry):Promise<void>;
+  /** Optional same-transaction outbox capability supplied by repositories that support atomic local enqueue. */
+  enqueueOutboxCommand?<T>(command: { readonly commandId:string; readonly idempotencyKey:string; readonly aggregateId:string; readonly aggregateVersion:number; readonly commandType:string; readonly payload:T; readonly createdAt:string; readonly status:"pending"|"in_flight"|"acknowledged"|"rejected"; readonly attempts:number }):Promise<"inserted"|"duplicate">;
 }
 export interface LedgerRepository { /** Implement as a serializable transaction or equivalent atomic unit. */ transaction<T>(work:(tx:LedgerTransaction)=>Promise<T>):Promise<T> }
 export interface PostingResult { readonly status:"posted"|"duplicate"; readonly entry:PostedJournalEntry }
