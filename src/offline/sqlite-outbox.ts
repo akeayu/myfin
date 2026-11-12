@@ -1,4 +1,4 @@
-import type { OutboxCommand, OutboxStore } from "./outbox.js";
+import type { OutboxCommand, OutboxStore, OutboxWorkerStore } from "./outbox.js";
 import type { SqliteDatabase } from "../storage/sqlite.js";
 
 export interface LeasedOutboxCommand<T = unknown> extends OutboxCommand<T> { readonly leaseExpiresAt: string; }
@@ -86,7 +86,7 @@ export interface OutboxWorkerResult { readonly status: "idle" | "acknowledged" |
 
 /** One-command worker. Server must deduplicate by idempotencyKey; local delivery is at-least-once. */
 export class OutboxWorker {
-  constructor(private readonly store: SqliteOutboxStore, private readonly transport: OutboxTransport,
+  constructor(private readonly store: OutboxWorkerStore, private readonly transport: OutboxTransport,
     private readonly now: () => Date = () => new Date(), private readonly maxBackoffMs = 60 * 60 * 1000) {}
   async processNext(): Promise<OutboxWorkerResult> {
     const claimed = await this.store.claimNext(this.now());
