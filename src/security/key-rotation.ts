@@ -20,7 +20,12 @@ async function isDatabaseKeyAccepted(sqlite: SqliteKeyRotationPort, database: st
 
 /** Repair the plugin's stored passphrase only after the candidate opens the real SQLCipher file. */
 async function synchronizePluginSecret(sqlite: SqliteKeyRotationPort, secret: string): Promise<void> {
-  if ((await sqlite.checkEncryptionSecret({ passphrase: secret })).result) return;
+  try {
+    if ((await sqlite.checkEncryptionSecret({ passphrase: secret })).result) return;
+  } catch {
+    // Missing or unreadable plugin secret is repaired only after SQLCipher
+    // independently authenticates the candidate database key.
+  }
   await sqlite.clearEncryptionSecret();
   await sqlite.setEncryptionSecret({ passphrase: secret });
   if (!(await sqlite.checkEncryptionSecret({ passphrase: secret })).result) {
