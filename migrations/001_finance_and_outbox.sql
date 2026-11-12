@@ -53,6 +53,17 @@ CREATE TABLE journal_lines (
      OR (credit_minor > 0 AND debit_minor = 0))
 );
 
+
+CREATE TRIGGER journal_line_must_match_entry_entity
+BEFORE INSERT ON journal_lines
+WHEN (SELECT entity_id FROM journal_entries WHERE id = NEW.journal_entry_id) IS NOT NEW.entity_id
+BEGIN SELECT RAISE(ABORT, 'journal line entity must match journal entry entity'); END;
+
+CREATE TRIGGER journal_line_update_must_match_entry_entity
+BEFORE UPDATE OF journal_entry_id, entity_id ON journal_lines
+WHEN (SELECT entity_id FROM journal_entries WHERE id = NEW.journal_entry_id) IS NOT NEW.entity_id
+BEGIN SELECT RAISE(ABORT, 'journal line entity must match journal entry entity'); END;
+
 CREATE INDEX journal_entries_entity_date ON journal_entries(entity_id, effective_date);
 CREATE INDEX journal_lines_entry ON journal_lines(journal_entry_id);
 CREATE INDEX journal_lines_account ON journal_lines(account_id);
