@@ -44,7 +44,7 @@ export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
     return {
       changeEncryptionSecret: options => CapacitorSQLite.changeEncryptionSecret(options),
       verifyDatabaseKey: async options => ({ valid: await this.verifyDatabaseKey(options.database, options.secret) }),
-      checkEncryptionSecret: options => CapacitorSQLite.checkEncryptionSecret(options),
+      checkEncryptionSecret: async options => ({ result: (await CapacitorSQLite.checkEncryptionSecret(options)).result === true }),
       clearEncryptionSecret: () => CapacitorSQLite.clearEncryptionSecret(),
       setEncryptionSecret: options => CapacitorSQLite.setEncryptionSecret(options)
     };
