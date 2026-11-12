@@ -29,6 +29,10 @@ wait_for_marker() {
 }
 
 # First installation creates an encrypted, portable backup in app-private files.
+wait_for_marker "MYFIN_ANDROID_SMOKE:ROTATION_PENDING"
+timeout 30s adb shell am force-stop com.myfin.app
+timeout 30s adb logcat -c
+timeout 30s adb shell am start -n com.myfin.app/.MainActivity
 wait_for_marker "MYFIN_ANDROID_SMOKE:BACKUP_READY"
 timeout 30s adb exec-out run-as com.myfin.app cat files/myfin-smoke-backup.json > "$BACKUP"
 python3 - <<'PY'
