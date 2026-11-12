@@ -39,6 +39,9 @@ export interface EncryptedBackupFileV1 {
   readonly ciphertext: string;
 }
 
+function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.slice().buffer as ArrayBuffer;
+}
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -54,7 +57,7 @@ function requirePassphrase(value: string): void {
 async function derive(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
   const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: KDF_ITERATIONS },
+    { name: "PBKDF2", hash: "SHA-256", salt: asArrayBuffer(salt), iterations: KDF_ITERATIONS },
     material,
     { name: "AES-GCM", length: 256 },
     false,
@@ -66,7 +69,7 @@ async function encryptPayload(payload: BackupPayloadV1, passphrase: string): Pro
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await derive(passphrase, salt);
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify(payload)));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: asArrayBuffer(iv) }, key, new TextEncoder().encode(JSON.stringify(payload)));
   return {
     magic: BACKUP_MAGIC, version: BACKUP_VERSION, kdf: "PBKDF2-HMAC-SHA256",
     iterations: KDF_ITERATIONS, cipher: "AES-256-GCM",
@@ -80,7 +83,7 @@ async function decryptPayload(backup: EncryptedBackupFileV1, passphrase: string)
       backup.cipher !== "AES-256-GCM") throw new Error("Unsupported MYFIN backup format.");
   const key = await derive(passphrase, fromBase64(backup.salt));
   const clear = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: fromBase64(backup.iv) }, key, fromBase64(backup.ciphertext)
+    { name: "AES-GCM", iv: asArrayBuffer(fromBase64(backup.iv)) }, key, asArrayBuffer(fromBase64(backup.ciphertext))
   );
   const payload = JSON.parse(new TextDecoder().decode(clear)) as BackupPayloadV1;
   if (payload.magic !== BACKUP_MAGIC || payload.version !== BACKUP_VERSION ||
