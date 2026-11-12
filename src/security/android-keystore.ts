@@ -13,11 +13,11 @@ export interface RecoveryEnvelopeV1 {
 }
 
 interface NativeKeyVault {
-  getOrCreateDatabaseKey(): Promise<{ secret: string }>;
-  exportRecoveryEnvelope(options: { passphrase: string }): Promise<RecoveryEnvelopeV1>;
-  restoreRecoveryEnvelope(options: RecoveryEnvelopeV1 & { passphrase: string }): Promise<void>;
-  prepareDatabaseKeyRotation(): Promise<{ rotationId: string; oldSecret: string; newSecret: string }>;
-  getPendingDatabaseKeyRotation(): Promise<{ pending: boolean; rotationId?: string; oldSecret?: string; newSecret?: string }>;
+  getOrCreateDatabaseKey(options: { database: string }): Promise<{ secret: string }>;
+  exportRecoveryEnvelope(options: { passphrase: string; database: string }): Promise<RecoveryEnvelopeV1>;
+  restoreRecoveryEnvelope(options: RecoveryEnvelopeV1 & { passphrase: string; database: string }): Promise<void>;
+  prepareDatabaseKeyRotation(options: { database: string }): Promise<{ rotationId: string; oldSecret: string; newSecret: string }>;
+  getPendingDatabaseKeyRotation(options: { database: string }): Promise<{ pending: boolean; rotationId?: string; oldSecret?: string; newSecret?: string }>;
   commitDatabaseKeyRotation(options: { rotationId: string }): Promise<void>;
   abortDatabaseKeyRotation(options: { rotationId: string }): Promise<void>;
   writeSmokeBackupFile(options: { content: string }): Promise<{ saved: boolean }>;
@@ -37,7 +37,7 @@ function requireAndroid(): void {
 export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
   async prepareForDatabaseOpen(database: string): Promise<void> {
     requireAndroid();
-    await reconcilePendingMyfinKeyRotation(this.sqliteRotationPort(), this, database);
+    await reconcilePendingMyfinKeyRotation(this.sqliteRotationPort(), { ...this, getPendingDatabaseKeyRotation: () => this.getPendingDatabaseKeyRotation(database) }, database);
   }
 
   sqliteRotationPort(): SqliteKeyRotationPort {
@@ -50,21 +50,21 @@ export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
     };
   }
 
-  async getOrCreateSecret(): Promise<string> {
+  async getOrCreateSecret(database: string): Promise<string> {
     requireAndroid();
-    const pending = await nativeVault.getPendingDatabaseKeyRotation();
+    const pending = await nativeVault.getPendingDatabaseKeyRotation({ database });
     if (pending.pending) throw new Error("A MYFIN database-key rotation is pending. Reconcile it before opening the encrypted database.");
-    const result = await nativeVault.getOrCreateDatabaseKey();
+    const result = await nativeVault.getOrCreateDatabaseKey({ database });
     if (!/^[A-Za-z0-9+/]{40,}={0,2}$/.test(result.secret)) {
       throw new Error("Android Keystore returned an invalid database key encoding.");
     }
     return result.secret;
   }
 
-  async exportRecoveryEnvelope(passphrase: string): Promise<RecoveryEnvelopeV1> {
+  async exportRecoveryEnvelope(passphrase: string, database: string): Promise<RecoveryEnvelopeV1> {
     requireAndroid();
     if (passphrase.length < 12) throw new Error("Use a recovery passphrase of at least 12 characters.");
-    return nativeVault.exportRecoveryEnvelope({ passphrase });
+    return nativeVault.exportRecoveryEnvelope({ passphrase, database });
   }
 
   async verifyDatabaseKey(database: string, secret: string): Promise<boolean> {
@@ -88,14 +88,14 @@ export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
     return (await nativeVault.readSmokeBackupFile()).content;
   }
 
-  async prepareDatabaseKeyRotation(): Promise<{ rotationId: string; oldSecret: string; newSecret: string }> {
+  async prepareDatabaseKeyRotation(database: string): Promise<{ rotationId: string; oldSecret: string; newSecret: string }> {
     requireAndroid();
-    return nativeVault.prepareDatabaseKeyRotation();
+    return nativeVault.prepareDatabaseKeyRotation({ database });
   }
 
-  async getPendingDatabaseKeyRotation(): Promise<{ pending: boolean; rotationId?: string; oldSecret?: string; newSecret?: string }> {
+  async getPendingDatabaseKeyRotation(database: string): Promise<{ pending: boolean; rotationId?: string; oldSecret?: string; newSecret?: string }> {
     requireAndroid();
-    return nativeVault.getPendingDatabaseKeyRotation();
+    return nativeVault.getPendingDatabaseKeyRotation({ database });
   }
 
   async commitDatabaseKeyRotation(rotationId: string): Promise<void> {
@@ -108,12 +108,12 @@ export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
     await nativeVault.abortDatabaseKeyRotation({ rotationId });
   }
 
-  async restoreRecoveryEnvelope(envelope: RecoveryEnvelopeV1, passphrase: string): Promise<void> {
+  async restoreRecoveryEnvelope(envelope: RecoveryEnvelopeV1, passphrase: string, database: string): Promise<void> {
     requireAndroid();
     if (passphrase.length < 12) throw new Error("Use the recovery passphrase of at least 12 characters.");
     if (envelope.version !== 1 || envelope.kdf !== "PBKDF2-HMAC-SHA256" || envelope.iterations !== 600000) {
       throw new Error("Unsupported MYFIN recovery envelope version or KDF parameters.");
     }
-    await nativeVault.restoreRecoveryEnvelope({ ...envelope, passphrase });
+    await nativeVault.restoreRecoveryEnvelope({ ...envelope, passphrase, database });
   }
 }
