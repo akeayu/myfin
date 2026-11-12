@@ -38,7 +38,7 @@ describe("SQLite persistence and migrations", () => {
     expect(duplicate.status).toBe("duplicate");
     expect(duplicate.entry.contentHash).toBe(first.entry.contentHash);
     expect(() => db.prepare("UPDATE journal_entries SET source_reference='tampered' WHERE id='j1'").run()).toThrow(/immutable/i);
-    expect(() => db.prepare("DELETE FROM journal_lines WHERE journal_entry_id='j1'").run()).toThrow(/immutable/i);
+    expect(() => db.prepare("DELETE FROM journal_lines WHERE journal_entry_id='j1'").run()).toThrow(/posted journal lines cannot be deleted/i);
   });
 
   it("rolls back a failed posting without leaving a partial journal", async () => {
