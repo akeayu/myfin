@@ -20,10 +20,15 @@ if (!activity.includes("MyfinKeyVaultPlugin.class")) {
 
 const appGradlePath = "android/app/build.gradle";
 let appGradle = await readFile(appGradlePath, "utf8");
-const sqlcipherDependency = "    implementation 'net.zetetic:sqlcipher-android:4.17.0@aar'";
-if (!appGradle.includes("net.zetetic:sqlcipher-android:4.17.0")) {
+const nativeDependencies = [
+  "    implementation 'net.zetetic:sqlcipher-android:4.17.0@aar'",
+  '    implementation "androidx.sqlite:sqlite:2.4.0"'
+];
+if (!appGradle.includes("net.zetetic:sqlcipher-android:4.17.0") ||
+    !appGradle.includes("androidx.sqlite:sqlite:2.4.0")) {
   if (!/dependencies\s*\{/.test(appGradle)) throw new Error("Android app dependencies block not found.");
-  appGradle = appGradle.replace(/dependencies\s*\{/, match => match + "\n" + sqlcipherDependency);
+  const missing = nativeDependencies.filter(line => !appGradle.includes(line.split(":").slice(0, 2).join(":")));
+  appGradle = appGradle.replace(/dependencies\s*\{/, match => match + "\n" + nativeDependencies.join("\n"));
   await writeFile(appGradlePath, appGradle);
 }
 
