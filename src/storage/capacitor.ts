@@ -30,6 +30,11 @@ export class CapacitorSqliteDatabase implements AsyncSqliteDatabase {
 
   private constructor(private readonly connection: SQLiteDBConnection) {}
 
+  /** Injection seam for deterministic bridge-contract tests; production uses open(). */
+  static fromConnection(connection: SQLiteDBConnection): CapacitorSqliteDatabase {
+    return new CapacitorSqliteDatabase(connection);
+  }
+
   static async open(options: {
     database: string;
     encrypted: boolean;
@@ -42,7 +47,7 @@ export class CapacitorSqliteDatabase implements AsyncSqliteDatabase {
     const exists = await sqlite.isConnection(options.database, options.readonly ?? false);
     const connection = exists.result
       ? await sqlite.retrieveConnection(options.database, options.readonly ?? false)
-      : await sqlite.createConnection(options.database, options.encrypted, options.mode ?? "no-encryption", options.version ?? 1, options.readonly ?? false);
+      : await sqlite.createConnection(options.database, options.encrypted, options.mode ?? (options.encrypted ? "encryption" : "no-encryption"), options.version ?? 1, options.readonly ?? false);
     await connection.open();
     const adapter = new CapacitorSqliteDatabase(connection);
     await adapter.execute("PRAGMA foreign_keys = ON");
