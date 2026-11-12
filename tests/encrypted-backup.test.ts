@@ -21,7 +21,6 @@ function makeHarness() {
     isSecretStored: vi.fn(async () => ({ result: secretStored })),
     setEncryptionSecret: vi.fn(async () => { secretStored = true; }),
     importFromJson: vi.fn(async () => { exists = true; encrypted = true; return { changes: { changes: 1 } }; }),
-    checkEncryptionSecret: vi.fn(async () => ({ result: true })),
     deleteDatabase: vi.fn(async () => { exists = false; })
   };
   const keyVault = {
