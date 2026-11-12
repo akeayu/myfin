@@ -1,6 +1,9 @@
 export interface SqliteKeyRotationPort {
   changeEncryptionSecret(options: { passphrase: string; oldpassphrase: string }): Promise<void>;
   verifyDatabaseKey(options: { database: string; secret: string }): Promise<{ valid: boolean }>;
+  checkEncryptionSecret(options: { passphrase: string }): Promise<{ result: boolean }>;
+  clearEncryptionSecret(): Promise<void>;
+  setEncryptionSecret(options: { passphrase: string }): Promise<void>;
 }
 export interface KeyVaultRotationPort {
   prepareDatabaseKeyRotation(): Promise<{ rotationId: string; oldSecret: string; newSecret: string }>;
@@ -10,16 +13,25 @@ export interface KeyVaultRotationPort {
 }
 export type RotationOutcome = "ROTATED" | "RECONCILED_COMMIT" | "RECONCILED_ABORT" | "NO_PENDING_ROTATION";
 
-async function isAccepted(sqlite: SqliteKeyRotationPort, database: string, secret: string): Promise<boolean> {
+async function isDatabaseKeyAccepted(sqlite: SqliteKeyRotationPort, database: string, secret: string): Promise<boolean> {
   try { return (await sqlite.verifyDatabaseKey({ database, secret })).valid === true; }
   catch { return false; }
 }
 
+/** Repair the plugin's stored passphrase only after the candidate opens the real SQLCipher file. */
+async function synchronizePluginSecret(sqlite: SqliteKeyRotationPort, secret: string): Promise<void> {
+  if ((await sqlite.checkEncryptionSecret({ passphrase: secret })).result) return;
+  await sqlite.clearEncryptionSecret();
+  await sqlite.setEncryptionSecret({ passphrase: secret });
+  if (!(await sqlite.checkEncryptionSecret({ passphrase: secret })).result) {
+    throw new Error("Capacitor SQLite did not persist the reconciled encryption secret.");
+  }
+}
+
 /**
- * Rotation is a two-phase operation: persist a Keystore-wrapped pending key,
- * rekey through SQLCipher, verify that the candidate key opens and passes
- * cipher_integrity_check on the actual database file, then promote the key.
- * A crash leaves a journal that must be reconciled before database access.
+ * Two-phase rotation: stage a Keystore-wrapped key, rekey SQLCipher, verify the
+ * real database with cipher_integrity_check, synchronize the plugin secret,
+ * then promote the staged key. A crash leaves a journal for startup recovery.
  */
 export async function rotateMyfinDatabaseKey(
   sqlite: SqliteKeyRotationPort,
@@ -30,18 +42,26 @@ export async function rotateMyfinDatabaseKey(
   const staged = await vault.prepareDatabaseKeyRotation();
   try {
     await sqlite.changeEncryptionSecret({ passphrase: staged.newSecret, oldpassphrase: staged.oldSecret });
-    if (!(await isAccepted(sqlite, database, staged.newSecret))) {
+    if (!(await isDatabaseKeyAccepted(sqlite, database, staged.newSecret))) {
       throw new Error("SQLCipher did not open and integrity-check the database with the proposed key.");
+    }
+    await synchronizePluginSecret(sqlite, staged.newSecret);
+    if (!(await isDatabaseKeyAccepted(sqlite, database, staged.newSecret))) {
+      throw new Error("SQLCipher verification failed after synchronizing the plugin secret.");
     }
     await vault.commitDatabaseKeyRotation(staged.rotationId);
     return "ROTATED";
   } catch (error) {
-    // Resolve ambiguous bridge/process failures from the database's actual key.
-    if (await isAccepted(sqlite, database, staged.newSecret)) {
+    if (await isDatabaseKeyAccepted(sqlite, database, staged.newSecret)) {
+      await synchronizePluginSecret(sqlite, staged.newSecret);
+      if (!(await isDatabaseKeyAccepted(sqlite, database, staged.newSecret))) {
+        throw new Error("New SQLCipher key is valid but plugin-secret reconciliation failed; pending rotation was preserved.", { cause: error });
+      }
       await vault.commitDatabaseKeyRotation(staged.rotationId);
       return "RECONCILED_COMMIT";
     }
-    if (await isAccepted(sqlite, database, staged.oldSecret)) {
+    if (await isDatabaseKeyAccepted(sqlite, database, staged.oldSecret)) {
+      await synchronizePluginSecret(sqlite, staged.oldSecret);
       await vault.abortDatabaseKeyRotation(staged.rotationId);
       throw error;
     }
@@ -61,11 +81,16 @@ export async function reconcilePendingMyfinKeyRotation(
   if (!pending.rotationId || !pending.oldSecret || !pending.newSecret) {
     throw new Error("Pending MYFIN key-rotation journal is incomplete. Database access remains blocked.");
   }
-  if (await isAccepted(sqlite, database, pending.newSecret)) {
+  if (await isDatabaseKeyAccepted(sqlite, database, pending.newSecret)) {
+    await synchronizePluginSecret(sqlite, pending.newSecret);
+    if (!(await isDatabaseKeyAccepted(sqlite, database, pending.newSecret))) {
+      throw new Error("New key is valid but plugin-secret reconciliation did not restore database access.");
+    }
     await vault.commitDatabaseKeyRotation(pending.rotationId);
     return "RECONCILED_COMMIT";
   }
-  if (await isAccepted(sqlite, database, pending.oldSecret)) {
+  if (await isDatabaseKeyAccepted(sqlite, database, pending.oldSecret)) {
+    await synchronizePluginSecret(sqlite, pending.oldSecret);
     await vault.abortDatabaseKeyRotation(pending.rotationId);
     return "RECONCILED_ABORT";
   }
