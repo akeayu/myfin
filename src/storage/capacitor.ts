@@ -5,7 +5,7 @@ import type { LedgerRepository, LedgerTransaction } from "../ledger/posting-serv
 export type SqlValue = string | number | bigint | null | Uint8Array;
 export interface SqlRunResult { readonly changes: number; readonly lastId?: number; }
 export interface EncryptionSecretProvider {
-  getOrCreateSecret(): Promise<string>;
+  getOrCreateSecret(database: string): Promise<string>;
   /** Reconcile interrupted key rotation before any encrypted database connection is opened. */
   prepareForDatabaseOpen?(database: string): Promise<void>;
 }
@@ -67,7 +67,7 @@ export class CapacitorSqliteDatabase implements AsyncSqliteDatabase {
       const secretStored = (await sqlite.isSecretStored()).result;
       if (!secretStored) {
         if (!options.encryptionSecretProvider) throw new Error("Encrypted MYFIN storage requires an Android Keystore-backed encryption secret provider.");
-        const secret = await options.encryptionSecretProvider.getOrCreateSecret();
+        const secret = await options.encryptionSecretProvider.getOrCreateSecret(options.database);
         if (secret.length < 32) throw new Error("The encryption secret provider returned an insufficient secret.");
         await sqlite.setEncryptionSecret(secret);
         if (!(await sqlite.isSecretStored()).result) throw new Error("The SQLite plugin did not persist the provisioned encryption secret.");
