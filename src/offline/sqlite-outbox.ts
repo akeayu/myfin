@@ -20,23 +20,27 @@ export class SqliteOutboxStore implements OutboxStore {
   constructor(private readonly db: SqliteDatabase, private readonly leaseMilliseconds = 60_000) {
     if (!Number.isSafeInteger(leaseMilliseconds) || leaseMilliseconds < 1_000) throw new Error("Outbox lease must be at least one second.");
   }
-  async insertIfAbsent<T>(command: OutboxCommand<T>): Promise<"inserted" | "duplicate"> {
+  /** Enqueues inside a caller-owned SQLite transaction, e.g. the same transaction as a ledger posting. */
+  enqueueInCurrentTransaction<T>(command: OutboxCommand<T>): "inserted" | "duplicate" {
     const payload = JSON.stringify(command.payload);
+    const existing = this.db.prepare("SELECT command_id, aggregate_id, aggregate_version, command_type, payload_json FROM sync_outbox WHERE idempotency_key = ?").get(command.idempotencyKey) as {command_id:string;aggregate_id:string;aggregate_version:number;command_type:string;payload_json:string}|undefined;
+    if (existing) {
+      if (existing.command_id !== command.commandId || existing.aggregate_id !== command.aggregateId ||
+          existing.aggregate_version !== command.aggregateVersion || existing.command_type !== command.commandType || existing.payload_json !== payload) {
+        throw new Error("Outbox idempotency key reused with a different command payload.");
+      }
+      return "duplicate";
+    }
+    this.db.prepare("INSERT INTO sync_outbox(command_id,idempotency_key,aggregate_id,aggregate_version,command_type,payload_json,created_at,status,attempts) VALUES(?,?,?,?,?,?,?,'pending',0)")
+      .run(command.commandId, command.idempotencyKey, command.aggregateId, command.aggregateVersion, command.commandType, payload, command.createdAt);
+    return "inserted";
+  }
+  async insertIfAbsent<T>(command: OutboxCommand<T>): Promise<"inserted" | "duplicate"> {
     begin(this.db);
     try {
-      const existing = this.db.prepare("SELECT command_id, aggregate_id, aggregate_version, command_type, payload_json FROM sync_outbox WHERE idempotency_key = ?").get(command.idempotencyKey) as {command_id:string;aggregate_id:string;aggregate_version:number;command_type:string;payload_json:string}|undefined;
-      if (existing) {
-        if (existing.command_id !== command.commandId || existing.aggregate_id !== command.aggregateId ||
-            existing.aggregate_version !== command.aggregateVersion || existing.command_type !== command.commandType || existing.payload_json !== payload) {
-          throw new Error("Outbox idempotency key reused with a different command payload.");
-        }
-        this.db.exec("COMMIT");
-        return "duplicate";
-      }
-      this.db.prepare("INSERT INTO sync_outbox(command_id,idempotency_key,aggregate_id,aggregate_version,command_type,payload_json,created_at,status,attempts) VALUES(?,?,?,?,?,?,?,'pending',0)")
-        .run(command.commandId, command.idempotencyKey, command.aggregateId, command.aggregateVersion, command.commandType, payload, command.createdAt);
+      const result = this.enqueueInCurrentTransaction(command);
       this.db.exec("COMMIT");
-      return "inserted";
+      return result;
     } catch (error) { rollback(this.db); throw error; }
   }
   async claimNext(now = new Date()): Promise<LeasedOutboxCommand | null> {
