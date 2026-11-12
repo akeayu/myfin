@@ -168,7 +168,7 @@ interface EntryRow {
 interface LineRow { account_id: string; currency: string; debit_minor: number | string; credit_minor: number | string; memo: string | null; }
 
 async function mapPosted(db: AsyncSqliteDatabase, entry: EntryRow): Promise<PostedJournalEntry> {
-  const lines = await db.query<LineRow>("SELECT account_id,currency,debit_minor,credit_minor,memo FROM journal_lines WHERE journal_entry_id=? ORDER BY id", [entry.id]);
+  const lines = await db.query<LineRow>("SELECT account_id,currency,CAST(debit_minor AS TEXT) AS debit_minor,CAST(credit_minor AS TEXT) AS credit_minor,memo FROM journal_lines WHERE journal_entry_id=? ORDER BY id", [entry.id]);
   return Object.freeze({
     id: entry.id, entityId: entry.entity_id, idempotencyKey: entry.idempotency_key, effectiveDate: entry.effective_date,
     recordedAt: entry.recorded_at, calendarSystem: entry.calendar_system, calendarAlgorithmVersion: entry.calendar_algorithm_version,
