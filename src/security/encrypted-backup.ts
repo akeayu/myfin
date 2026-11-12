@@ -15,7 +15,6 @@ export interface SqliteBackupPort {
   isSecretStored(): Promise<{ result: boolean }>;
   setEncryptionSecret(options: { passphrase: string }): Promise<void>;
   importFromJson(options: { jsonstring: string }): Promise<{ changes?: { changes?: number } }>;
-  checkEncryptionSecret(options: { passphrase: string }): Promise<{ result: boolean }>;
   deleteDatabase(options: { database: string }): Promise<void>;
 }
 
@@ -89,7 +88,12 @@ async function decryptPayload(backup: EncryptedBackupFileV1, passphrase: string)
   if (payload.magic !== BACKUP_MAGIC || payload.version !== BACKUP_VERSION ||
       !/^[a-zA-Z0-9_-]{1,64}$/.test(payload.database) ||
       !payload.sqliteExport || typeof payload.sqliteExport !== "object" ||
-      !payload.recovery || payload.recovery.version !== 1) throw new Error("MYFIN backup payload validation failed.");
+      payload.sqliteExport.database !== payload.database || payload.sqliteExport.encrypted !== true ||
+      payload.sqliteExport.mode !== "full" ||
+      !payload.recovery || payload.recovery.version !== 1 ||
+      payload.recovery.kdf !== "PBKDF2-HMAC-SHA256" || payload.recovery.iterations !== 600000) {
+    throw new Error("MYFIN backup payload validation failed.");
+  }
   return payload;
 }
 
@@ -139,11 +143,6 @@ export class MyfinEncryptedBackupService {
 
     try {
       const importObject = { ...payload.sqliteExport, database, overwrite: false, encrypted: true };
-      const validation = await this.sqlite.checkEncryptionSecret({ passphrase: secret });
-      if (validation.result === false && (await this.sqlite.isSecretStored()).result) {
-        // A new installation has no DB yet; checkEncryptionSecret can legitimately
-        // return false before import. Do not treat that as a credential mismatch.
-      }
       const imported = await this.sqlite.importFromJson({ jsonstring: JSON.stringify(importObject) });
       if ((imported.changes?.changes ?? 0) < 0) throw new Error("SQLite rejected the encrypted backup import.");
       if (!(await this.sqlite.isDatabase({ database })).result) throw new Error("Imported database was not created.");
