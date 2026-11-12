@@ -21,6 +21,7 @@ async function run(): Promise<void> {
     isDatabaseEncrypted(options: { database: string }): Promise<{ result: boolean }>;
     isDatabase(options: { database: string }): Promise<{ result: boolean }>;
     deleteDatabase(options: { database: string }): Promise<void>;
+    checkEncryptionSecret(options: { passphrase: string }): Promise<{ result: boolean }>;
   };
   const keyVault = new AndroidKeystoreSecretProvider();
   const backupService = new MyfinEncryptedBackupService(sqlite, keyVault);
@@ -74,6 +75,10 @@ async function run(): Promise<void> {
   await db.close();
 
   await rotateMyfinDatabaseKey(sqlite, keyVault);
+  const rotatedSecret = await keyVault.getOrCreateSecret();
+  if (rotatedSecret === originalSecret) fail("Keystore database key did not change during rotation.");
+  if ((await sqlite.checkEncryptionSecret({ passphrase: originalSecret })).result) fail("Old SQLCipher key still authenticates after rotation.");
+  if (!(await sqlite.checkEncryptionSecret({ passphrase: rotatedSecret })).result) fail("New SQLCipher key does not authenticate after rotation.");
   db = await CapacitorSqliteDatabase.open({ database: dbName, encrypted: true, encryptionSecretProvider: keyVault });
   const reopened = await db.query<{ id: string; value: string }>("SELECT id,value FROM smoke_records");
   if (reopened.length !== 1 || reopened[0]?.value !== "MYFIN_ANDROID_SMOKE_SENTINEL") fail("Encrypted database did not survive SQLCipher rekey and reopen.");
