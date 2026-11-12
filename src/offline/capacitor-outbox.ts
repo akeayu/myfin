@@ -1,4 +1,4 @@
-import type { OutboxCommand, OutboxStore } from "./outbox.js";
+import type { OutboxCommand, OutboxWorkerStore } from "./outbox.js";
 import type { AsyncSqliteDatabase } from "../storage/capacitor.js";
 
 export interface AsyncLeasedOutboxCommand<T = unknown> extends OutboxCommand<T> { readonly leaseExpiresAt: string; }
@@ -16,7 +16,7 @@ function commandFromRow<T>(row: OutboxRow): OutboxCommand<T> {
 }
 
 /** Async, plugin-backed durable outbox with atomic leasing and at-least-once delivery. */
-export class CapacitorOutboxStore implements OutboxStore {
+export class CapacitorOutboxStore implements OutboxWorkerStore {
   constructor(private readonly db: AsyncSqliteDatabase, private readonly leaseMilliseconds = 60_000) {
     if (!Number.isSafeInteger(leaseMilliseconds) || leaseMilliseconds < 1_000) throw new Error("Outbox lease must be at least one second.");
   }
