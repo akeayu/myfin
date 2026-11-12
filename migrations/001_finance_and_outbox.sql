@@ -64,6 +64,18 @@ BEFORE UPDATE OF journal_entry_id, entity_id ON journal_lines
 WHEN (SELECT entity_id FROM journal_entries WHERE id = NEW.journal_entry_id) IS NOT NEW.entity_id
 BEGIN SELECT RAISE(ABORT, 'journal line entity must match journal entry entity'); END;
 
+CREATE UNIQUE INDEX one_reversal_per_entry ON journal_entries(reverses_entry_id) WHERE reverses_entry_id IS NOT NULL;
+
+CREATE TRIGGER reversal_must_reference_posted_entry
+BEFORE INSERT ON journal_entries
+WHEN NEW.reverses_entry_id IS NOT NULL
+BEGIN
+  SELECT CASE WHEN (SELECT status FROM journal_entries WHERE id = NEW.reverses_entry_id) <> 'posted'
+    THEN RAISE(ABORT, 'reversal target must already be posted') END;
+  SELECT CASE WHEN (SELECT entity_id FROM journal_entries WHERE id = NEW.reverses_entry_id) <> NEW.entity_id
+    THEN RAISE(ABORT, 'reversal and original must belong to the same entity') END;
+END;
+
 CREATE INDEX journal_entries_entity_date ON journal_entries(entity_id, effective_date);
 CREATE INDEX journal_lines_entry ON journal_lines(journal_entry_id);
 CREATE INDEX journal_lines_account ON journal_lines(account_id);
