@@ -113,6 +113,66 @@ public class MyfinKeyVaultPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void verifyMissingKeyFailsClosed(PluginCall call) {
+        String original = null;
+        try {
+            if ((getContext().getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) == 0)
+                throw new SecurityException("The missing-key destructive probe is debug-build only.");
+            String database = call.getString("database", "");
+            java.io.File file = databaseFile(database);
+            if (!file.isFile()) throw new IllegalStateException("The fail-closed probe requires an existing database file.");
+            original = prefs().getString(ACTIVE, null);
+            if (original == null) throw new IllegalStateException("The fail-closed probe requires an active wrapped key.");
+            if (!prefs().edit().remove(ACTIVE).commit()) throw new IllegalStateException("Unable to stage missing-key probe.");
+            boolean refused = false;
+            try {
+                activeKey(database);
+            } catch (IllegalStateException expected) {
+                refused = expected.getMessage() != null && expected.getMessage().contains("artifacts exist");
+            }
+            if (!refused) throw new IllegalStateException("MYFIN silently provisioned a replacement key when an existing database had no active key.");
+            if (prefs().contains(ACTIVE)) throw new IllegalStateException("MYFIN persisted a replacement key during the missing-key probe.");
+            JSObject ret = new JSObject();
+            ret.put("protected", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("MYFIN missing-key fail-closed probe failed.", e);
+        } finally {
+            if (original != null && !prefs().edit().putString(ACTIVE, original).commit()) {
+                android.util.Log.e("MyfinKeyVault", "CRITICAL: unable to restore original wrapped key after debug probe.");
+            }
+        }
+    }
+
+    @PluginMethod
+    public void getKeystoreDiagnostics(PluginCall call) {
+        try {
+            SecretKey key = wrappingKey(false);
+            java.security.KeyFactory factory = java.security.KeyFactory.getInstance(key.getAlgorithm(), "AndroidKeyStore");
+            android.security.keystore.KeyInfo info = (android.security.keystore.KeyInfo) factory.getKeySpec(key, android.security.keystore.KeyInfo.class);
+            JSObject ret = new JSObject();
+            ret.put("insideSecureHardware", info.isInsideSecureHardware());
+            String level = "UNKNOWN";
+            boolean strongBox = false;
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                int securityLevel = info.getSecurityLevel();
+                if (securityLevel == android.security.keystore.KeyProperties.SECURITY_LEVEL_SOFTWARE) level = "SOFTWARE";
+                else if (securityLevel == android.security.keystore.KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT) level = "TRUSTED_ENVIRONMENT";
+                else if (securityLevel == android.security.keystore.KeyProperties.SECURITY_LEVEL_STRONGBOX) { level = "STRONGBOX"; strongBox = true; }
+            } else if (info.isInsideSecureHardware()) {
+                level = "HARDWARE_UNSPECIFIED";
+            } else {
+                level = "SOFTWARE";
+            }
+            ret.put("securityLevel", level);
+            ret.put("strongBoxBacked", strongBox);
+            ret.put("androidApi", android.os.Build.VERSION.SDK_INT);
+            ret.put("deviceModel", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL);
+            call.resolve(ret);
+        } catch (Exception e) { call.reject("Unable to inspect MYFIN Android Keystore security level.", e); }
+    }
+
+    @PluginMethod
     public void verifyDatabaseKey(PluginCall call) {
         SQLiteDatabase database = null;
         try {
