@@ -25,9 +25,9 @@ function makeHarness() {
     deleteDatabase: vi.fn(async () => { exists = false; })
   };
   const keyVault = {
-    getOrCreateSecret: vi.fn(async () => "A".repeat(44)),
-    exportRecoveryEnvelope: vi.fn(async () => recovery),
-    restoreRecoveryEnvelope: vi.fn(async () => undefined)
+    getOrCreateSecret: vi.fn(async (_database: string) => "A".repeat(44)),
+    exportRecoveryEnvelope: vi.fn(async (_passphrase: string, _database: string) => recovery),
+    restoreRecoveryEnvelope: vi.fn(async (_envelope: RecoveryEnvelopeV1, _passphrase: string, _database: string) => undefined)
   };
   return { service: new MyfinEncryptedBackupService(sqlite, keyVault), sqlite, keyVault, state: () => ({ exists, secretStored, encrypted }) };
 }
@@ -45,7 +45,7 @@ describe("MYFIN encrypted backup", () => {
     const target = makeHarness();
     const restored = await target.service.restoreBackup(serialized, "correct-horse-battery-staple");
     expect(restored.database).toBe("myfin_test");
-    expect(target.keyVault.restoreRecoveryEnvelope).toHaveBeenCalledWith(recovery, "correct-horse-battery-staple");
+    expect(target.keyVault.restoreRecoveryEnvelope).toHaveBeenCalledWith(recovery, "correct-horse-battery-staple", "myfin_test");
     expect(target.sqlite.setEncryptionSecret).toHaveBeenCalled();
     expect(target.sqlite.importFromJson).toHaveBeenCalledOnce();
     expect(target.state()).toEqual({ exists: true, secretStored: true, encrypted: true });
