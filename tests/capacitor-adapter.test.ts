@@ -5,10 +5,21 @@ import { CapacitorSqliteDatabase, applyAsyncMigrations } from "../src/storage/ca
 function fakeConnection() {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   let active = false;
+  let migrationChecksum: string | null = null;
   const connection = {
-    execute: vi.fn(async (...args: unknown[]) => { calls.push({ method: "execute", args }); }),
-    run: vi.fn(async (...args: unknown[]) => { calls.push({ method: "run", args }); return { changes: { changes: 1, lastId: 9 } }; }),
-    query: vi.fn(async (...args: unknown[]) => { calls.push({ method: "query", args }); return { values: [{ id: "x" }] }; }),
+    execute: vi.fn(async (...args: unknown[]) => { calls.push({ method: "execute", args }); return { changes: { changes: 0 } }; }),
+    run: vi.fn(async (...args: unknown[]) => {
+      calls.push({ method: "run", args });
+      if (String(args[0]).startsWith("INSERT INTO schema_migrations")) migrationChecksum = String((args[1] as unknown[])[1]);
+      return { changes: { changes: 1, lastId: 9 } };
+    }),
+    query: vi.fn(async (...args: unknown[]) => {
+      calls.push({ method: "query", args });
+      const sql = String(args[0]);
+      if (sql.startsWith("SELECT checksum FROM schema_migrations")) return { values: migrationChecksum ? [{ checksum: migrationChecksum }] : [] };
+      if (sql.startsWith("SELECT id, checksum FROM schema_migrations")) return { values: migrationChecksum ? [{ id: "001_base.sql", checksum: migrationChecksum }] : [] };
+      return { values: [{ id: "x" }] };
+    }),
     beginTransaction: vi.fn(async () => { active = true; calls.push({ method: "begin", args: [] }); return { changes: { changes: 0 } }; }),
     commitTransaction: vi.fn(async () => { active = false; calls.push({ method: "commit", args: [] }); return { changes: { changes: 0 } }; }),
     rollbackTransaction: vi.fn(async () => { active = false; calls.push({ method: "rollback", args: [] }); return { changes: { changes: 0 } }; }),
@@ -52,5 +63,6 @@ describe("Capacitor SQLite async adapter contract", () => {
     await expect(applyAsyncMigrations(db, migrations)).resolves.toHaveLength(1);
     expect(fake.native.beginTransaction).toHaveBeenCalledTimes(1);
     expect(fake.native.commitTransaction).toHaveBeenCalledTimes(1);
+    await expect(applyAsyncMigrations(db, [{ id: "001_base.sql", sql: "CREATE TABLE changed(id TEXT);" }])).rejects.toThrow(/checksum mismatch/i);
   });
 });
