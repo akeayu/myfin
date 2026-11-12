@@ -3,7 +3,6 @@ import { CapacitorSQLite } from "@capacitor-community/sqlite";
 import { CapacitorSqliteDatabase } from "../src/storage/capacitor.js";
 import { AndroidKeystoreSecretProvider } from "../src/security/android-keystore.js";
 import { MyfinEncryptedBackupService, type SqliteBackupPort } from "../src/security/encrypted-backup.js";
-import { rotateMyfinDatabaseKey } from "../src/security/key-rotation.js";
 
 const status = document.querySelector<HTMLPreElement>("#status");
 function report(message: string): void {
@@ -42,6 +41,24 @@ async function run(): Promise<void> {
     return;
   }
 
+
+  const pending = await keyVault.getPendingDatabaseKeyRotation();
+  if (pending.pending) {
+    if (!pending.oldSecret || !pending.newSecret) fail("Pending rotation record is incomplete.");
+    const recoveredDb = await CapacitorSqliteDatabase.open({ database: dbName, encrypted: true, encryptionSecretProvider: keyVault });
+    const recoveredRows = await recoveredDb.query<{ id: string; value: string }>("SELECT id,value FROM smoke_records");
+    if (recoveredRows.length !== 1 || recoveredRows[0]?.value !== "MYFIN_ANDROID_SMOKE_SENTINEL") fail("Database did not survive interrupted key rotation.");
+    if (await keyVault.verifyDatabaseKey(dbName, pending.oldSecret)) fail("Old SQLCipher key still opens after recovery.");
+    if (!(await keyVault.verifyDatabaseKey(dbName, pending.newSecret))) fail("Recovered SQLCipher key failed integrity verification.");
+    if ((await keyVault.getPendingDatabaseKeyRotation()).pending) fail("Startup did not reconcile the pending rotation.");
+    const recoveredBackup = await backupService.exportBackup(dbName, backupPassphrase);
+    if (!recoveredBackup.includes("MYFIN-ENCRYPTED-BACKUP") || recoveredBackup.includes("MYFIN_ANDROID_SMOKE_SENTINEL")) fail("Encrypted backup is missing or exposes plaintext.");
+    await keyVault.writeSmokeBackupFile(recoveredBackup);
+    await recoveredDb.close();
+    report("MYFIN_ANDROID_SMOKE:BACKUP_READY rotation-reconciled-encrypted-export");
+    return;
+  }
+
   // First-install path: create synthetic data, verify rollback, rotate key, and
   // create the portable encrypted backup for the second installation.
   const originalSecret = await keyVault.getOrCreateSecret();
@@ -73,22 +90,9 @@ async function run(): Promise<void> {
   if (inside.length !== 1 || inside[0]?.id !== "committed") fail("Transaction rollback did not preserve only the committed row.");
   await db.close();
 
-  await rotateMyfinDatabaseKey(keyVault.sqliteRotationPort(), keyVault, dbName);
-  const rotatedSecret = await keyVault.getOrCreateSecret();
-  if (rotatedSecret === originalSecret) fail("Keystore database key did not change during rotation.");
-  if (await keyVault.verifyDatabaseKey(dbName, originalSecret)) fail("Old SQLCipher key still opens the database after rotation.");
-  if (!(await keyVault.verifyDatabaseKey(dbName, rotatedSecret))) fail("New SQLCipher key does not open and integrity-check the database after rotation.");
-  db = await CapacitorSqliteDatabase.open({ database: dbName, encrypted: true, encryptionSecretProvider: keyVault });
-  const reopened = await db.query<{ id: string; value: string }>("SELECT id,value FROM smoke_records");
-  if (reopened.length !== 1 || reopened[0]?.value !== "MYFIN_ANDROID_SMOKE_SENTINEL") fail("Encrypted database did not survive SQLCipher rekey and reopen.");
-
-  const backupText = await backupService.exportBackup(dbName, backupPassphrase);
-  if (!backupText.includes("MYFIN-ENCRYPTED-BACKUP") || backupText.includes("MYFIN_ANDROID_SMOKE_SENTINEL")) {
-    fail("Backup envelope is missing or exposes the synthetic plaintext marker.");
-  }
-  await keyVault.writeSmokeBackupFile(backupText);
-  await db.close();
-  report("MYFIN_ANDROID_SMOKE:BACKUP_READY encrypted-export-key-rotation-rollback");
+  const stagedRotation = await keyVault.prepareDatabaseKeyRotation();
+  await sqlite.changeEncryptionSecret({ passphrase: stagedRotation.newSecret, oldpassphrase: stagedRotation.oldSecret });
+  report("MYFIN_ANDROID_SMOKE:ROTATION_PENDING restart-required-before-keystore-promotion");
 }
 
 run().catch(error => {
