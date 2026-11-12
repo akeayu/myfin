@@ -16,17 +16,25 @@ timeout 120s adb shell am start -n com.myfin.app/.MainActivity
 
 wait_for_marker() {
   local marker="$1"
-  for attempt in $(seq 1 150); do
+  # Avoid xtracing the captured logcat variable; it can be megabytes.
+  set +x
+  for attempt in $(seq 1 180); do
     local log
-    log="$(timeout 30s adb logcat -d 2>/dev/null || true)"
-    if grep -q "$marker" <<<"$log"; then return 0; fi
-    if grep -q "MYFIN_ANDROID_SMOKE:FAIL" <<<"$log" || grep -q "FATAL EXCEPTION" <<<"$log"; then
+    log="$(timeout 20s adb logcat -d -t 3000 2>/dev/null || true)"
+    if grep -q "$marker" <<<"$log"; then set -x; return 0; fi
+    if grep -q "MYFIN_ANDROID_SMOKE:FAIL" <<<"$log" ||
+       grep -q "FATAL EXCEPTION" <<<"$log" ||
+       grep -q "Fatal signal" <<<"$log"; then
+      set -x
       printf '%s\\n' "$log" | tail -n 350
       return 1
     fi
     sleep 2
   done
-  timeout 60s adb logcat -d | tail -n 350
+  local log
+  log="$(timeout 60s adb logcat -d -t 1500 2>/dev/null || true)"
+  set -x
+  printf '%s\\n' "$log" | tail -n 350
   echo "Timed out waiting for $marker" >&2
   return 1
 }
@@ -55,6 +63,42 @@ timeout 120s adb shell am start -n com.myfin.app/.MainActivity
 
 # The second installation must restore the SQLCipher DB and wrap its key with
 # the new installation's Android Keystore key, using only the encrypted backup.
+# Snapshot app-private files while WAL, rollback-journal and TEMP probes are live.
+wait_for_marker "MYFIN_ANDROID_SMOKE:SIDECAR_READY"
+timeout 120s adb exec-out run-as com.myfin.app sh -c 'cd /data/user/0/com.myfin.app && toybox tar -cf - .' > /tmp/myfin-app-private.tar
+python3 - <<'PY'
+from pathlib import Path
+import tarfile
+
+archive_path = Path("/tmp/myfin-app-private.tar")
+assert archive_path.stat().st_size > 4096, "app-private snapshot is unexpectedly small"
+with tarfile.open(archive_path, "r:") as archive:
+    members = [item for item in archive.getmembers() if item.isfile()]
+    names = [item.name for item in members]
+    required = [
+        "databases/myfin_android_smokeSQLite.db-wal",
+        "databases/myfin_android_smokeSQLite.db-shm",
+        "databases/myfin_journal_smokeSQLite.db-journal",
+    ]
+    for suffix in required:
+        assert any(name.endswith(suffix) for name in names), f"expected live sidecar missing: {suffix}"
+    temp_files = [name for name in names if "etilqs_" in name.lower()]
+    assert temp_files, "SQLite file-backed TEMP database file was not found in app-private storage"
+    sentinels = (b"MYFIN_WAL_SENTINEL", b"MYFIN_JOURNAL_SENTINEL", b"MYFIN_TEMP_SENTINEL_")
+    leaks = []
+    for member in members:
+        stream = archive.extractfile(member)
+        if stream is None:
+            continue
+        payload = stream.read()
+        for sentinel in sentinels:
+            if sentinel in payload:
+                leaks.append((member.name, sentinel.decode("ascii")))
+    assert not leaks, f"plaintext sentinel leaked into app-private file(s): {leaks}"
+    print(f"PASS: inspected {len(members)} app-private files; WAL, SHM, rollback journal and TEMP file present; no sentinel plaintext found")
+    print("TEMP files: " + ", ".join(temp_files[:10]))
+PY
+wait_for_marker "MYFIN_ANDROID_SMOKE:SIDECAR_PASS"
 wait_for_marker "MYFIN_ANDROID_SMOKE:RESTORE_PASS"
 timeout 120s adb shell run-as com.myfin.app ls -l databases
 timeout 120s adb exec-out run-as com.myfin.app cat databases/myfin_android_smokeSQLite.db > /tmp/myfin-android-smoke.db
