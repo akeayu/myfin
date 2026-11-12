@@ -1,0 +1,13 @@
+export interface EthiopianDate { readonly year:number; readonly month:number; readonly day:number }
+export interface GregorianDate { readonly year:number; readonly month:number; readonly day:number }
+export const ETHIOPIAN_CALENDAR_ALGORITHM_VERSION="ec-jdn-1";
+const EC_EPOCH_JDN=1723856, UNIX_EPOCH_JDN=2440588, DAY_MS=86400000;
+export function isEthiopianLeapYear(year:number):boolean { assertYear(year); return year%4===3; }
+export function daysInEthiopianMonth(year:number,month:number):number { assertYear(year); if(!Number.isInteger(month)||month<1||month>13) throw new Error("Month must be 1 through 13."); return month===13?(isEthiopianLeapYear(year)?6:5):30; }
+export function validateEthiopianDate(d:EthiopianDate):void { if(!Number.isInteger(d.day)||d.day<1||d.day>daysInEthiopianMonth(d.year,d.month)) throw new Error("Invalid Ethiopian calendar day."); }
+function yearStartJdn(y:number):number { return EC_EPOCH_JDN+365*(y-1)+Math.floor((y-1)/4); }
+export function ethiopianToGregorian(d:EthiopianDate):GregorianDate { validateEthiopianDate(d); const j=yearStartJdn(d.year)+30*(d.month-1)+d.day-1; const dt=new Date((j-UNIX_EPOCH_JDN)*DAY_MS); if(Number.isNaN(dt.getTime())) throw new Error("Date out of range."); return {year:dt.getUTCFullYear(),month:dt.getUTCMonth()+1,day:dt.getUTCDate()}; }
+function gregorianJdn(d:GregorianDate):number { if(![d.year,d.month,d.day].every(Number.isInteger)||d.year<1||d.month<1||d.month>12||d.day<1) throw new Error("Invalid Gregorian date."); const dt=new Date(Date.UTC(d.year,d.month-1,d.day)); if(dt.getUTCFullYear()!==d.year||dt.getUTCMonth()+1!==d.month||dt.getUTCDate()!==d.day) throw new Error("Invalid Gregorian date."); return Math.floor(dt.getTime()/DAY_MS)+UNIX_EPOCH_JDN; }
+export function gregorianToEthiopian(d:GregorianDate):EthiopianDate { const j=gregorianJdn(d); let y=Math.max(1,Math.floor((j-EC_EPOCH_JDN)/365.2425)+1); while(yearStartJdn(y+1)<=j)y++; while(yearStartJdn(y)>j)y--; const n=j-yearStartJdn(y); return {year:y,month:Math.floor(n/30)+1,day:n%30+1}; }
+export function addEthiopianMonths(d:EthiopianDate,delta:number):EthiopianDate { validateEthiopianDate(d); if(!Number.isSafeInteger(delta)) throw new Error("Month delta must be a safe integer."); const n=(d.year-1)*13+d.month-1+delta; if(n<0) throw new Error("Date out of range."); const y=Math.floor(n/13)+1,m=n%13+1; return {year:y,month:m,day:Math.min(d.day,daysInEthiopianMonth(y,m))}; }
+function assertYear(y:number):void { if(!Number.isSafeInteger(y)||y<1) throw new Error("Year must be a positive safe integer."); }
