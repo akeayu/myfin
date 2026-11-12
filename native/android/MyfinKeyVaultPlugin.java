@@ -24,6 +24,8 @@ public class MyfinKeyVaultPlugin extends Plugin {
     private static final String ALIAS = "myfin.database.key.wrap.v1";
     private static final String PREFS = "myfin_key_vault_v1";
     private static final String ACTIVE = "wrapped_database_key";
+    private static final String PENDING = "pending_wrapped_database_key";
+    private static final String PENDING_ID = "pending_rotation_id";
     private static final int GCM_TAG_BITS = 128;
     private static final int KEY_BYTES = 32;
     private static final int PBKDF2_ITERATIONS = 600000;
@@ -86,6 +88,68 @@ public class MyfinKeyVaultPlugin extends Plugin {
             ret.put("secret", Base64.encodeToString(activeKey(), Base64.NO_WRAP));
             call.resolve(ret);
         } catch (Exception e) { call.reject("MYFIN Keystore key unavailable.", e); }
+    }
+
+    @PluginMethod
+    public void prepareDatabaseKeyRotation(PluginCall call) {
+        try {
+            if (prefs().getString(PENDING, null) != null) throw new IllegalStateException("A database-key rotation is already pending.");
+            byte[] oldKey = activeKey();
+            byte[] newKey = new byte[KEY_BYTES];
+            new SecureRandom().nextBytes(newKey);
+            String rotationId = java.util.UUID.randomUUID().toString();
+            boolean saved = prefs().edit()
+                .putString(PENDING, Base64.encodeToString(wrap(newKey), Base64.NO_WRAP))
+                .putString(PENDING_ID, rotationId).commit();
+            if (!saved) throw new IllegalStateException("Unable to persist staged database-key rotation.");
+            JSObject ret = new JSObject();
+            ret.put("rotationId", rotationId);
+            ret.put("oldSecret", Base64.encodeToString(oldKey, Base64.NO_WRAP));
+            ret.put("newSecret", Base64.encodeToString(newKey, Base64.NO_WRAP));
+            call.resolve(ret);
+        } catch (Exception e) { call.reject("Unable to stage MYFIN database-key rotation.", e); }
+    }
+
+    @PluginMethod
+    public void getPendingDatabaseKeyRotation(PluginCall call) {
+        try {
+            String pending = prefs().getString(PENDING, null);
+            JSObject ret = new JSObject();
+            ret.put("pending", pending != null);
+            if (pending != null) {
+                ret.put("rotationId", prefs().getString(PENDING_ID, ""));
+                ret.put("oldSecret", Base64.encodeToString(activeKey(), Base64.NO_WRAP));
+                ret.put("newSecret", Base64.encodeToString(unwrap(Base64.decode(pending, Base64.NO_WRAP)), Base64.NO_WRAP));
+            }
+            call.resolve(ret);
+        } catch (Exception e) { call.reject("Unable to inspect pending MYFIN key rotation.", e); }
+    }
+
+    @PluginMethod
+    public void commitDatabaseKeyRotation(PluginCall call) {
+        try {
+            String rotationId = call.getString("rotationId", "");
+            String pendingId = prefs().getString(PENDING_ID, null);
+            String pending = prefs().getString(PENDING, null);
+            if (pending == null || pendingId == null || !pendingId.equals(rotationId))
+                throw new IllegalStateException("MYFIN key-rotation receipt does not match the pending operation.");
+            if (!prefs().edit().putString(ACTIVE, pending).remove(PENDING).remove(PENDING_ID).commit())
+                throw new IllegalStateException("Unable to commit MYFIN database-key rotation.");
+            call.resolve();
+        } catch (Exception e) { call.reject("Unable to commit MYFIN database-key rotation.", e); }
+    }
+
+    @PluginMethod
+    public void abortDatabaseKeyRotation(PluginCall call) {
+        try {
+            String rotationId = call.getString("rotationId", "");
+            String pendingId = prefs().getString(PENDING_ID, null);
+            if (pendingId == null || !pendingId.equals(rotationId))
+                throw new IllegalStateException("MYFIN key-rotation receipt does not match the pending operation.");
+            if (!prefs().edit().remove(PENDING).remove(PENDING_ID).commit())
+                throw new IllegalStateException("Unable to clear staged MYFIN key rotation.");
+            call.resolve();
+        } catch (Exception e) { call.reject("Unable to abort MYFIN database-key rotation.", e); }
     }
 
     @PluginMethod
