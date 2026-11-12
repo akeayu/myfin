@@ -3,7 +3,7 @@ import { CapacitorSQLite } from "@capacitor-community/sqlite";
 import { CapacitorSqliteDatabase } from "../src/storage/capacitor.js";
 import { AndroidKeystoreSecretProvider } from "../src/security/android-keystore.js";
 import { MyfinEncryptedBackupService, type SqliteBackupPort } from "../src/security/encrypted-backup.js";
-import { rotateMyfinDatabaseKey, type SqliteKeyRotationPort } from "../src/security/key-rotation.js";
+import { rotateMyfinDatabaseKey } from "../src/security/key-rotation.js";
 
 const status = document.querySelector<HTMLPreElement>("#status");
 function report(message: string): void {
@@ -17,11 +17,10 @@ function fail(message: string): never {
 
 async function run(): Promise<void> {
   if (Capacitor.getPlatform() !== "android") fail("Expected native Android platform.");
-  const sqlite = CapacitorSQLite as unknown as SqliteBackupPort & SqliteKeyRotationPort & {
+  const sqlite = CapacitorSQLite as unknown as SqliteBackupPort & {
     isDatabaseEncrypted(options: { database: string }): Promise<{ result: boolean }>;
     isDatabase(options: { database: string }): Promise<{ result: boolean }>;
     deleteDatabase(options: { database: string }): Promise<void>;
-    verifyDatabaseKey(options: { database: string; secret: string }): Promise<{ valid: boolean }>;
   };
   const keyVault = new AndroidKeystoreSecretProvider();
   const backupService = new MyfinEncryptedBackupService(sqlite, keyVault);
@@ -74,7 +73,7 @@ async function run(): Promise<void> {
   if (inside.length !== 1 || inside[0]?.id !== "committed") fail("Transaction rollback did not preserve only the committed row.");
   await db.close();
 
-  await rotateMyfinDatabaseKey(sqlite, keyVault, dbName);
+  await rotateMyfinDatabaseKey(keyVault.sqliteRotationPort(), keyVault, dbName);
   const rotatedSecret = await keyVault.getOrCreateSecret();
   if (rotatedSecret === originalSecret) fail("Keystore database key did not change during rotation.");
   if (await keyVault.verifyDatabaseKey(dbName, originalSecret)) fail("Old SQLCipher key still opens the database after rotation.");
