@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 
 const manifestPath = "android/app/src/main/AndroidManifest.xml";
 let manifest = await readFile(manifestPath, "utf8");
-const application = manifest.match(/<application\\b[^>]*>/s);
+const application = manifest.match(/<application\b[^>]*>/s);
 if (!application) throw new Error("Android application manifest tag not found.");
 let tag = application[0];
 function setAttribute(name, value) {
@@ -17,20 +17,23 @@ manifest = manifest.replace(application[0], tag);
 await writeFile(manifestPath, manifest);
 const rulesPath = "android/app/src/main/res/xml/data_extraction_rules.xml";
 await mkdir(dirname(rulesPath), { recursive: true });
-await writeFile(rulesPath, `<?xml version="1.0" encoding="utf-8"?>
-<data-extraction-rules>
-  <cloud-backup>
-    <exclude domain="root" />
-    <exclude domain="database" />
-    <exclude domain="sharedpref" />
-    <exclude domain="external" />
-  </cloud-backup>
-  <device-transfer>
-    <exclude domain="root" />
-    <exclude domain="database" />
-    <exclude domain="sharedpref" />
-    <exclude domain="external" />
-  </device-transfer>
-</data-extraction-rules>
-`);
+const rules = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  '<data-extraction-rules>',
+  '  <cloud-backup>',
+  '    <exclude domain="root" />',
+  '    <exclude domain="database" />',
+  '    <exclude domain="sharedpref" />',
+  '    <exclude domain="external" />',
+  '  </cloud-backup>',
+  '  <device-transfer>',
+  '    <exclude domain="root" />',
+  '    <exclude domain="database" />',
+  '    <exclude domain="sharedpref" />',
+  '    <exclude domain="external" />',
+  '  </device-transfer>',
+  '</data-extraction-rules>',
+  ''
+].join('\n');
+await writeFile(rulesPath, rules);
 console.log("Android backup defaults disabled; explicit encrypted export/recovery remains a separate MYFIN feature.");
