@@ -37,7 +37,12 @@ function requireAndroid(): void {
 export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
   async prepareForDatabaseOpen(database: string): Promise<void> {
     requireAndroid();
-    await reconcilePendingMyfinKeyRotation(this.sqliteRotationPort(), { ...this, getPendingDatabaseKeyRotation: () => this.getPendingDatabaseKeyRotation(database) }, database);
+    await reconcilePendingMyfinKeyRotation(this.sqliteRotationPort(), {
+      prepareDatabaseKeyRotation: () => this.prepareDatabaseKeyRotation(database),
+      getPendingDatabaseKeyRotation: () => this.getPendingDatabaseKeyRotation(database),
+      commitDatabaseKeyRotation: rotationId => this.commitDatabaseKeyRotation(rotationId),
+      abortDatabaseKeyRotation: rotationId => this.abortDatabaseKeyRotation(rotationId)
+    }, database);
   }
 
   sqliteRotationPort(): SqliteKeyRotationPort {
