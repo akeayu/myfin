@@ -69,8 +69,12 @@ export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
 
   async verifyDatabaseKey(database: string, secret: string): Promise<boolean> {
     requireAndroid();
-    const result = await nativeVault.verifyDatabaseKey({ database, secret });
-    return result.valid === true;
+    try {
+      const result = await nativeVault.verifyDatabaseKey({ database, secret });
+      return result.valid === true;
+    } catch {
+      return false;
+    }
   }
 
   async writeSmokeBackupFile(content: string): Promise<void> {
