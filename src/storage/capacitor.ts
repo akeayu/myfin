@@ -177,6 +177,20 @@ export class CapacitorLedgerRepository implements LedgerRepository {
             if (!found.length) throw new Error("Account is missing, inactive, wrong entity, or wrong currency: " + item.accountId);
           }
         },
+        enqueueOutboxCommand: async command => {
+          const payload = JSON.stringify(command.payload);
+          const existing = await connection.query<{ command_id: string; aggregate_id: string; aggregate_version: number; command_type: string; payload_json: string }>(
+            "SELECT command_id,aggregate_id,aggregate_version,command_type,payload_json FROM sync_outbox WHERE idempotency_key=?",
+            [command.idempotencyKey]
+          );
+          if (existing[0]) {
+            const row = existing[0];
+            if (row.command_id !== command.commandId || row.aggregate_id !== command.aggregateId || row.aggregate_version !== command.aggregateVersion || row.command_type !== command.commandType || row.payload_json !== payload) throw new Error("Outbox idempotency key reused with a different command payload.");
+            return "duplicate" as const;
+          }
+          await connection.run("INSERT INTO sync_outbox(command_id,idempotency_key,aggregate_id,aggregate_version,command_type,payload_json,created_at,status,attempts) VALUES(?,?,?,?,?,?,?,'pending',0)", [command.commandId, command.idempotencyKey, command.aggregateId, command.aggregateVersion, command.commandType, payload, command.createdAt]);
+          return "inserted" as const;
+        },
         insertPostedEntry: async entry => {
           await connection.run(
             "INSERT INTO journal_entries(id,entity_id,idempotency_key,effective_date,recorded_at,calendar_system,calendar_algorithm_version,source_reference,status,posted_at,content_hash) VALUES(?,?,?,?,?,?,?,?, 'draft',NULL,NULL)",
