@@ -16,8 +16,8 @@ async function run(): Promise<void> {
   if (Capacitor.getPlatform() !== "android") fail("Expected native Android platform.");
   const plugin = new SQLiteConnection(CapacitorSQLite);
   const secret = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");
-  const initializeEncryptionSecret = async (connection: SQLiteConnection): Promise<void> => {
-    await connection.setEncryptionSecret(secret);
+  const encryptionSecretProvider = {
+    getOrCreateSecret: async (): Promise<string> => secret
   };
 
   const dbName = "myfin_android_smoke";
@@ -25,7 +25,7 @@ async function run(): Promise<void> {
     database: dbName,
     encrypted: true,
     mode: "secret",
-    initializeEncryptionSecret
+    encryptionSecretProvider
   });
   await db.execute("CREATE TABLE IF NOT EXISTS smoke_records (id TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)");
   await db.run("INSERT OR REPLACE INTO smoke_records(id,value) VALUES(?,?)", ["committed", "MYFIN_ANDROID_SMOKE_SENTINEL"]);
