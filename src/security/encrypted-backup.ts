@@ -81,9 +81,15 @@ async function decryptPayload(backup: EncryptedBackupFileV1, passphrase: string)
   if (backup.magic !== BACKUP_MAGIC || backup.version !== BACKUP_VERSION ||
       backup.kdf !== "PBKDF2-HMAC-SHA256" || backup.iterations !== KDF_ITERATIONS ||
       backup.cipher !== "AES-256-GCM") throw new Error("Unsupported MYFIN backup format.");
-  const key = await derive(passphrase, fromBase64(backup.salt));
+  const salt = fromBase64(backup.salt);
+  const iv = fromBase64(backup.iv);
+  const ciphertext = fromBase64(backup.ciphertext);
+  if (salt.length !== 16 || iv.length !== 12 || ciphertext.length < 16) {
+    throw new Error("MYFIN backup cryptographic field lengths are invalid.");
+  }
+  const key = await derive(passphrase, salt);
   const clear = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: asArrayBuffer(fromBase64(backup.iv)) }, key, asArrayBuffer(fromBase64(backup.ciphertext))
+    { name: "AES-GCM", iv: asArrayBuffer(iv) }, key, asArrayBuffer(ciphertext)
   );
   const payload = JSON.parse(new TextDecoder().decode(clear)) as BackupPayloadV1;
   if (payload.magic !== BACKUP_MAGIC || payload.version !== BACKUP_VERSION ||
