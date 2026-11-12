@@ -1,0 +1,80 @@
+name: MYFIN Android SQLite verification
+on:
+  push:
+    branches:
+      - feat/a3-financial-calendar-offline-iroka-foundation
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android-sqlcipher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run type and unit tests
+        run: npm run check
+      - name: Build Android smoke application
+        run: npm run build:android-smoke
+      - name: Generate Capacitor Android project
+        run: npx cap add android
+      - name: Disable automatic Android app-data backup
+        run: node scripts/patch-android-manifest.mjs
+      - name: Sync native Capacitor plugins
+        run: npx cap sync android
+      - name: Build debug APK
+        run: |
+          chmod +x android/gradlew
+          ./android/gradlew -p android app:assembleDebug
+      - name: Run encrypted SQLite tests on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          script: |
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb logcat -c
+            adb shell am start -n com.myfin.app/.MainActivity
+            passed=0
+            for attempt in $(seq 1 90); do
+              if adb logcat -d | grep -q "MYFIN_ANDROID_SMOKE:PASS"; then
+                passed=1
+                break
+              fi
+              if adb logcat -d | grep -q "MYFIN_ANDROID_SMOKE:FAIL"; then
+                adb logcat -d | tail -n 250
+                exit 1
+              fi
+              sleep 2
+            done
+            if [ "$passed" -ne 1 ]; then
+              adb logcat -d | tail -n 250
+              exit 1
+            fi
+            adb shell run-as com.myfin.app ls -l databases
+            adb exec-out run-as com.myfin.app cat databases/myfin_android_smokeSQLite.db > /tmp/myfin-android-smoke.db
+            python3 - <<'PY'
+            from pathlib import Path
+            data = Path("/tmp/myfin-android-smoke.db").read_bytes()
+            assert len(data) > 4096, f"database unexpectedly small: {len(data)} bytes"
+            assert data[:16] != b"SQLite format 3\\x00", "database has a plaintext SQLite header"
+            assert b"MYFIN_ANDROID_SMOKE_SENTINEL" not in data, "synthetic plaintext marker found in database file"
+            print(f"PASS: encrypted database file inspected ({len(data)} bytes); plaintext SQLite header and sentinel absent")
+            PY
