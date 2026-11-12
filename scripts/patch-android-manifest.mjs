@@ -1,5 +1,22 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { copyFile } from "node:fs/promises";
+
+const pluginSource = "native/android/MyfinKeyVaultPlugin.java";
+const pluginTarget = "android/app/src/main/java/com/myfin/app/MyfinKeyVaultPlugin.java";
+await mkdir(dirname(pluginTarget), { recursive: true });
+await copyFile(pluginSource, pluginTarget);
+
+const activityPath = "android/app/src/main/java/com/myfin/app/MainActivity.java";
+let activity = await readFile(activityPath, "utf8");
+if (!activity.includes("MyfinKeyVaultPlugin.class")) {
+  activity = activity.replace(
+    /public class MainActivity extends BridgeActivity\\s*\\{/,
+    "public class MainActivity extends BridgeActivity {\\n    @Override\\n    public void onCreate(android.os.Bundle savedInstanceState) {\\n        registerPlugin(MyfinKeyVaultPlugin.class);\\n        super.onCreate(savedInstanceState);\\n    }"
+  );
+  await writeFile(activityPath, activity);
+}
+
 
 const manifestPath = "android/app/src/main/AndroidManifest.xml";
 let manifest = await readFile(manifestPath, "utf8");
