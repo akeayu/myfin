@@ -14,7 +14,13 @@ export interface AsyncSqliteDatabase {
 
 type PluginValue = string | number | null | Blob | ArrayBuffer;
 function pluginValues(values: readonly SqlValue[] = []): PluginValue[] {
-  return values.map(value => typeof value === "bigint" ? value.toString() : value instanceof Uint8Array ? value.slice().buffer as ArrayBuffer : value as PluginValue);
+  return values.map(value => {
+    if (typeof value === "bigint") {
+      if (value < -9223372036854775808n || value > 9223372036854775807n) throw new Error("SQLite INTEGER binding exceeds the signed 64-bit range.");
+      return value.toString();
+    }
+    return value instanceof Uint8Array ? value.slice().buffer as ArrayBuffer : value as PluginValue;
+  });
 }
 
 /**
@@ -39,16 +45,30 @@ export class CapacitorSqliteDatabase implements AsyncSqliteDatabase {
     database: string;
     encrypted: boolean;
     mode?: "encryption" | "secret" | "newsecret";
+    initializeEncryptionSecret?: (sqlite: SQLiteConnection) => Promise<void>;
     version?: number;
     readonly?: boolean;
   }): Promise<CapacitorSqliteDatabase> {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(options.database)) throw new Error("Invalid MYFIN database name.");
     const sqlite = new SQLiteConnection((await import("@capacitor-community/sqlite")).CapacitorSQLite);
-    const exists = await sqlite.isConnection(options.database, options.readonly ?? false);
-    const connection = exists.result
+    const consistent = (await sqlite.checkConnectionsConsistency()).result;
+    const exists = (await sqlite.isConnection(options.database, options.readonly ?? false)).result;
+    if (options.encrypted) {
+      const secretStored = (await sqlite.isSecretStored()).result;
+      if (!secretStored) {
+        if (!options.initializeEncryptionSecret) throw new Error("Encrypted MYFIN storage requires a secret provisioned by the approved platform key manager.");
+        await options.initializeEncryptionSecret(sqlite);
+        if (!(await sqlite.isSecretStored()).result) throw new Error("The platform key manager did not provision the SQLite encryption secret.");
+      }
+    }
+    const connection = consistent && exists
       ? await sqlite.retrieveConnection(options.database, options.readonly ?? false)
-      : await sqlite.createConnection(options.database, options.encrypted, options.mode ?? (options.encrypted ? "encryption" : "no-encryption"), options.version ?? 1, options.readonly ?? false);
+      : await sqlite.createConnection(options.database, options.encrypted, options.mode ?? (options.encrypted ? "secret" : "no-encryption"), options.version ?? 1, options.readonly ?? false);
     await connection.open();
+    if (options.encrypted && !(await sqlite.isDatabaseEncrypted(options.database)).result) {
+      await connection.close();
+      throw new Error("SQLCipher did not report the MYFIN database as encrypted.");
+    }
     const adapter = new CapacitorSqliteDatabase(connection);
     await adapter.execute("PRAGMA foreign_keys = ON");
     return adapter;
@@ -56,13 +76,16 @@ export class CapacitorSqliteDatabase implements AsyncSqliteDatabase {
 
   async execute(sql: string): Promise<void> {
     this.assertOpen();
-    await this.connection.execute(sql, false);
+    const result = await this.connection.execute(sql, false);
+    if ((result.changes?.changes ?? 0) < 0) throw new Error("Capacitor SQLite execute failed.");
   }
 
   async run(sql: string, values: readonly SqlValue[] = []): Promise<SqlRunResult> {
     this.assertOpen();
     const result = await this.connection.run(sql, pluginValues(values), false, "no");
-    return { changes: result.changes?.changes ?? 0, ...(result.changes?.lastId === undefined ? {} : { lastId: result.changes.lastId }) };
+    const changes = result.changes?.changes ?? 0;
+    if (changes < 0) throw new Error("Capacitor SQLite run failed.");
+    return { changes, ...(result.changes?.lastId === undefined ? {} : { lastId: result.changes.lastId }) };
   }
 
   async query<T extends Record<string, unknown>>(sql: string, values: readonly SqlValue[] = []): Promise<readonly T[]> {
