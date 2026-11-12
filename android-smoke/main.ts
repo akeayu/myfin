@@ -57,11 +57,15 @@ async function run(): Promise<void> {
     const journalDb = await CapacitorSqliteDatabase.open({ database: journalDbName, encrypted: true, mode: "secret", encryptionSecretProvider: keyVault });
     await journalDb.execute("PRAGMA journal_mode=DELETE");
     await journalDb.execute("CREATE TABLE IF NOT EXISTS sidecar_journal_probe(value TEXT NOT NULL)");
+    let signalJournalReady: (() => void) | undefined;
+    const journalReady = new Promise<void>(resolve => { signalJournalReady = resolve; });
     const journalHold = journalDb.transaction(async tx => {
       await tx.run("INSERT INTO sidecar_journal_probe(value) VALUES(?)", ["MYFIN_JOURNAL_SENTINEL"]);
       report("MYFIN_ANDROID_SMOKE:JOURNAL_READY");
-      await new Promise(resolve => setTimeout(resolve, 20000));
+      signalJournalReady?.();
+      await new Promise(resolve => setTimeout(resolve, 25000));
     });
+    await journalReady;
     report("MYFIN_ANDROID_SMOKE:SIDECAR_READY wal-temp-rollback-journal-open");
     await journalHold;
     await journalDb.close();
@@ -119,6 +123,10 @@ async function run(): Promise<void> {
   const inside = await db.query<{ id: string; value: string }>("SELECT id,value FROM smoke_records ORDER BY id");
   if (inside.length !== 1 || inside[0]?.id !== "committed") fail("Transaction rollback did not preserve only the committed row.");
   await db.close();
+
+  if (!(await keyVault.verifyMissingKeyFailsClosed(dbName))) fail("Missing active key was not rejected for an existing encrypted database.");
+  const keystore = await keyVault.getKeystoreDiagnostics();
+  report("MYFIN_ANDROID_SMOKE:KEYSTORE_DIAGNOSTICS " + JSON.stringify(keystore));
 
   const stagedRotation = await keyVault.prepareDatabaseKeyRotation(dbName);
   await sqlite.changeEncryptionSecret({ passphrase: stagedRotation.newSecret, oldpassphrase: stagedRotation.oldSecret });
