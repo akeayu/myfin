@@ -18,7 +18,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@capacitor-community/sqlite": "7.0.1",
-    "@capacitor/core": "^7.4.3"
+    "@capacitor-community/sqlite": "8.1.1",
+    "@capacitor/core": "^8.6.0"
   }
 }
