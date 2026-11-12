@@ -1,4 +1,6 @@
 import { registerPlugin } from "@capacitor/core";
+import { CapacitorSQLite } from "@capacitor-community/sqlite";
+import { reconcilePendingMyfinKeyRotation, type SqliteKeyRotationPort } from "./key-rotation.js";
 import type { EncryptionSecretProvider } from "../storage/capacitor.js";
 
 export interface RecoveryEnvelopeV1 {
@@ -33,6 +35,21 @@ function requireAndroid(): void {
 
 /** Native Android Keystore-backed key provider. Never replace with browser/localStorage storage. */
 export class AndroidKeystoreSecretProvider implements EncryptionSecretProvider {
+  async prepareForDatabaseOpen(database: string): Promise<void> {
+    requireAndroid();
+    await reconcilePendingMyfinKeyRotation(this.sqliteRotationPort(), this, database);
+  }
+
+  sqliteRotationPort(): SqliteKeyRotationPort {
+    return {
+      changeEncryptionSecret: options => CapacitorSQLite.changeEncryptionSecret(options),
+      verifyDatabaseKey: async options => ({ valid: await this.verifyDatabaseKey(options.database, options.secret) }),
+      checkEncryptionSecret: options => CapacitorSQLite.checkEncryptionSecret(options),
+      clearEncryptionSecret: () => CapacitorSQLite.clearEncryptionSecret(),
+      setEncryptionSecret: options => CapacitorSQLite.setEncryptionSecret(options)
+    };
+  }
+
   async getOrCreateSecret(): Promise<string> {
     requireAndroid();
     const pending = await nativeVault.getPendingDatabaseKeyRotation();
