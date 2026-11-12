@@ -35,10 +35,11 @@ public class MyfinKeyVaultPlugin extends Plugin {
         return getContext().getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE);
     }
 
-    private SecretKey wrappingKey() throws Exception {
+    private SecretKey wrappingKey(boolean createIfMissing) throws Exception {
         KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
         ks.load(null);
         if (ks.containsAlias(ALIAS)) return (SecretKey) ks.getKey(ALIAS, null);
+        if (!createIfMissing) throw new IllegalStateException("MYFIN Android Keystore wrapping key is missing; refusing to generate a replacement.");
         javax.crypto.KeyGenerator generator = javax.crypto.KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
         generator.init(new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -51,7 +52,7 @@ public class MyfinKeyVaultPlugin extends Plugin {
 
     private byte[] wrap(byte[] plaintext) throws Exception {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.ENCRYPT_MODE, wrappingKey());
+        cipher.init(Cipher.ENCRYPT_MODE, wrappingKey(true));
         byte[] iv = cipher.getIV();
         byte[] ciphertext = cipher.doFinal(plaintext);
         byte[] result = new byte[1 + iv.length + ciphertext.length];
@@ -66,16 +67,35 @@ public class MyfinKeyVaultPlugin extends Plugin {
         byte[] iv = java.util.Arrays.copyOfRange(wrapped, 1, 1 + ivLength);
         byte[] ciphertext = java.util.Arrays.copyOfRange(wrapped, 1 + ivLength, wrapped.length);
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.DECRYPT_MODE, wrappingKey(), new GCMParameterSpec(GCM_TAG_BITS, iv));
+        cipher.init(Cipher.DECRYPT_MODE, wrappingKey(false), new GCMParameterSpec(GCM_TAG_BITS, iv));
         return cipher.doFinal(ciphertext);
     }
 
-    private byte[] activeKey() throws Exception {
+    private java.io.File databaseFile(String database) {
+        if (database == null || !database.matches("[a-zA-Z0-9_-]{1,64}"))
+            throw new IllegalArgumentException("Invalid MYFIN database name.");
+        return getContext().getDatabasePath(database + "SQLite.db");
+    }
+
+    private void refuseProvisioningIfDatabaseArtifactsExist(String database) {
+        java.io.File file = databaseFile(database);
+        String path = file.getAbsolutePath();
+        String[] artifacts = { path, path + "-wal", path + "-shm", path + "-journal" };
+        for (String artifact : artifacts) {
+            if (new java.io.File(artifact).isFile()) {
+                throw new IllegalStateException("MYFIN encrypted database artifacts exist but the active Keystore key is missing. Refusing to generate a replacement key; restore the original key and database together.");
+            }
+        }
+    }
+
+    private byte[] activeKey(String database) throws Exception {
         String stored = prefs().getString(ACTIVE, null);
         if (stored == null) {
+            refuseProvisioningIfDatabaseArtifactsExist(database);
             byte[] key = new byte[KEY_BYTES];
             new SecureRandom().nextBytes(key);
-            if (!prefs().edit().putString(ACTIVE, Base64.encodeToString(wrap(key), Base64.NO_WRAP)).commit())
+            String wrapped = Base64.encodeToString(wrap(key), Base64.NO_WRAP);
+            if (!prefs().edit().putString(ACTIVE, wrapped).commit())
                 throw new IllegalStateException("Unable to persist wrapped MYFIN database key.");
             return key;
         }
@@ -85,8 +105,9 @@ public class MyfinKeyVaultPlugin extends Plugin {
     @PluginMethod
     public void getOrCreateDatabaseKey(PluginCall call) {
         try {
+            String database = call.getString("database", "");
             JSObject ret = new JSObject();
-            ret.put("secret", Base64.encodeToString(activeKey(), Base64.NO_WRAP));
+            ret.put("secret", Base64.encodeToString(activeKey(database), Base64.NO_WRAP));
             call.resolve(ret);
         } catch (Exception e) { call.reject("MYFIN Keystore key unavailable.", e); }
     }
@@ -125,7 +146,8 @@ public class MyfinKeyVaultPlugin extends Plugin {
     public void prepareDatabaseKeyRotation(PluginCall call) {
         try {
             if (prefs().getString(PENDING, null) != null) throw new IllegalStateException("A database-key rotation is already pending.");
-            byte[] oldKey = activeKey();
+            String database = call.getString("database", "");
+            byte[] oldKey = activeKey(database);
             byte[] newKey = new byte[KEY_BYTES];
             new SecureRandom().nextBytes(newKey);
             String rotationId = java.util.UUID.randomUUID().toString();
@@ -144,12 +166,13 @@ public class MyfinKeyVaultPlugin extends Plugin {
     @PluginMethod
     public void getPendingDatabaseKeyRotation(PluginCall call) {
         try {
+            String database = call.getString("database", "");
             String pending = prefs().getString(PENDING, null);
             JSObject ret = new JSObject();
             ret.put("pending", pending != null);
             if (pending != null) {
                 ret.put("rotationId", prefs().getString(PENDING_ID, ""));
-                ret.put("oldSecret", Base64.encodeToString(activeKey(), Base64.NO_WRAP));
+                ret.put("oldSecret", Base64.encodeToString(activeKey(database), Base64.NO_WRAP));
                 ret.put("newSecret", Base64.encodeToString(unwrap(Base64.decode(pending, Base64.NO_WRAP)), Base64.NO_WRAP));
             }
             call.resolve(ret);
@@ -237,7 +260,8 @@ public class MyfinKeyVaultPlugin extends Plugin {
             byte[] derived = factory.generateSecret(spec).getEncoded();
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(derived, "AES"));
-            byte[] ciphertext = cipher.doFinal(activeKey());
+            String database = call.getString("database", "");
+            byte[] ciphertext = cipher.doFinal(activeKey(database));
             JSObject ret = new JSObject();
             ret.put("version", 1); ret.put("kdf", "PBKDF2-HMAC-SHA256");
             ret.put("iterations", PBKDF2_ITERATIONS);
@@ -254,6 +278,7 @@ public class MyfinKeyVaultPlugin extends Plugin {
         char[] passphrase = call.getString("passphrase", "").toCharArray();
         PBEKeySpec spec = null;
         try {
+            String database = call.getString("database", "");
             if (call.getInt("version", 0) != 1 || !"PBKDF2-HMAC-SHA256".equals(call.getString("kdf")) ||
                 call.getInt("iterations", 0) != PBKDF2_ITERATIONS) throw new IllegalArgumentException("Unsupported recovery envelope.");
             if (passphrase.length < 12) throw new IllegalArgumentException("Recovery passphrase must contain at least 12 characters.");
@@ -269,6 +294,7 @@ public class MyfinKeyVaultPlugin extends Plugin {
             byte[] key = cipher.doFinal(ciphertext);
             if (key.length != KEY_BYTES) throw new IllegalArgumentException("Invalid recovered database key.");
             String current = prefs().getString(ACTIVE, null);
+            if (current == null) refuseProvisioningIfDatabaseArtifactsExist(database);
             if (current != null) {
                 byte[] currentKey = unwrap(Base64.decode(current, Base64.NO_WRAP));
                 if (!java.security.MessageDigest.isEqual(currentKey, key))
