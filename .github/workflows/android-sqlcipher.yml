@@ -42,6 +42,7 @@ jobs:
           chmod +x android/gradlew
           ./android/gradlew -p android app:assembleDebug
       - name: Run encrypted SQLite tests on Android emulator
+        timeout-minutes: 15
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
