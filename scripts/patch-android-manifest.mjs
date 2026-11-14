@@ -11,12 +11,24 @@ await copyFile(smokePluginSource, smokePluginTarget);
 
 const activityPath = "android/app/src/main/java/com/myfin/app/MainActivity.java";
 let activity = await readFile(activityPath, "utf8");
-if (!activity.includes("MyfinKeyVaultPlugin.class") || !activity.includes("MyfinSmokeMarkerPlugin.class")) {
-  activity = activity.replace(
-    /public class MainActivity extends BridgeActivity\s*\{/,
-    "public class MainActivity extends BridgeActivity {\n    @Override\n    public void onCreate(android.os.Bundle savedInstanceState) {\n        registerPlugin(MyfinKeyVaultPlugin.class);
-        registerPlugin(MyfinSmokeMarkerPlugin.class);\n        super.onCreate(savedInstanceState);\n    }"
-  );
+const requiredRegistrations = [
+  ["MyfinKeyVaultPlugin.class", "registerPlugin(MyfinKeyVaultPlugin.class);"],
+  ["MyfinSmokeMarkerPlugin.class", "registerPlugin(MyfinSmokeMarkerPlugin.class);"]
+];
+const missingRegistrations = requiredRegistrations
+  .filter(([className]) => !activity.includes(className))
+  .map(([, statement]) => "        " + statement);
+if (missingRegistrations.length > 0) {
+  const onCreate = [
+    "    @Override",
+    "    public void onCreate(android.os.Bundle savedInstanceState) {",
+    ...missingRegistrations,
+    "        super.onCreate(savedInstanceState);",
+    "    }"
+  ].join("\\n");
+  const classPattern = /public class MainActivity extends BridgeActivity\\s*\\{/;
+  if (!classPattern.test(activity)) throw new Error("Capacitor MainActivity class declaration not found.");
+  activity = activity.replace(classPattern, match => match + "\\n" + onCreate);
   await writeFile(activityPath, activity);
 }
 
