@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feat/a3-financial-calendar-offline-iroka-foundation
+      - fix/a3-keystore-fail-closed-sidecar
   pull_request:
     branches:
       - main
