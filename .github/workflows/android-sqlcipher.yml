@@ -51,57 +51,8 @@ jobs:
           grep -q 'NATIVE_ACTIVITY_ONCREATE' "$ACTIVITY"
           grep -q 'NATIVE_ACTIVITY_ONRESUME' "$ACTIVITY"
           echo "PASS: native Activity lifecycle markers are present in the Java source passed to Gradle."
-      - name: Build minimal WebView-only control APK
-        run: |
-          mkdir -p android/app/src/main/assets
-          cp android-smoke/webview-control.html android/app/src/main/assets/webview-control.html
-          mkdir -p android/app/src/main/java/com/myfin/app
-          cat > android/app/src/main/java/com/myfin/app/WebViewControlActivity.java <<'JAVA'
-          package com.myfin.app;
-
-          import android.app.Activity;
-          import android.os.Bundle;
-          import android.webkit.WebChromeClient;
-          import android.webkit.WebView;
-          import android.webkit.WebViewClient;
-
-          public final class WebViewControlActivity extends Activity {
-              private WebView webView;
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  webView = new WebView(this);
-                  webView.setWebViewClient(new WebViewClient());
-                  webView.setWebChromeClient(new WebChromeClient());
-                  webView.getSettings().setJavaScriptEnabled(true);
-                  setContentView(webView);
-                  webView.loadUrl("file:///android_asset/webview-control.html");
-              }
-
-              @Override
-              protected void onDestroy() {
-                  if (webView != null) {
-                      webView.stopLoading();
-                      webView.destroy();
-                      webView = null;
-                  }
-                  super.onDestroy();
-              }
-          }
-          JAVA
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("android/app/src/main/AndroidManifest.xml")
-          s = p.read_text()
-          marker = "    </application>"
-          activity = '        <activity android:name=".WebViewControlActivity" android:exported="true" android:label="WebView control" />\n'
-          assert marker in s and "WebViewControlActivity" not in s
-          p.write_text(s.replace(marker, activity + marker))
-          PY
-          chmod +x android/gradlew
-          ./android/gradlew -p android app:assembleDebug
-          cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/myfin-webview-control.apk
+      - name: Build independent standalone WebView control APK
+        run: bash scripts/build-webview-control.sh
       - name: Build debug APK
         run: |
           chmod +x android/gradlew
@@ -112,7 +63,7 @@ jobs:
           name: myfin-android-storage-smoke-apk
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/debug/myfin-webview-control.apk
+            build/webview-control/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
       - name: Run encrypted SQLite tests on Android emulator

@@ -3,6 +3,8 @@ set -euo pipefail
 set -x
 
 APK="android/app/build/outputs/apk/debug/app-debug.apk"
+CONTROL_APK="build/webview-control/app/build/outputs/apk/debug/app-debug.apk"
+CONTROL_PACKAGE="org.myfin.webviewcontrol"
 BACKUP="/tmp/myfin-separate-install-backup.json"
 
 # Hosted Android emulators can take several minutes to service package-manager
@@ -20,10 +22,12 @@ diagnostic_snapshot() {
   timeout 20s adb shell getprop sys.boot_completed 2>&1 || true
   echo "===== PACKAGE INSTALLATION STATE ====="
   timeout 20s adb shell pm path com.myfin.app 2>&1 || true
+  timeout 20s adb shell pm path org.myfin.webviewcontrol 2>&1 || true
   timeout 20s adb shell dumpsys package com.myfin.app 2>&1 | grep -E 'Package \[|versionCode=|versionName=|codePath=|userId=|enabled=' | head -n 40 || true
   echo "===== PROCESS PID AND STATE ====="
   timeout 20s adb shell pidof com.myfin.app 2>&1 || true
-  timeout 20s adb shell ps -A 2>&1 | grep -E 'com[.]myfin|webview|sandboxed_process' | tail -n 80 || true
+  timeout 20s adb shell pidof org.myfin.webviewcontrol 2>&1 || true
+  timeout 20s adb shell ps -A 2>&1 | grep -E 'com[.]myfin|org[.]myfin[.]webviewcontrol|webview|sandboxed_process' | tail -n 80 || true
   echo "===== ACTIVITY / FOREGROUND ====="
   timeout 20s adb shell dumpsys activity activities 2>&1 | grep -E 'mResumedActivity|topResumedActivity|com[.]myfin' | tail -n 100 || true
   timeout 20s adb shell dumpsys window windows 2>&1 | grep -E 'mCurrentFocus|mFocusedApp|com[.]myfin' | tail -n 80 || true
@@ -41,11 +45,10 @@ diagnostic_snapshot() {
 
 # First run a native Activity that uses android.webkit.WebView directly.
 # It does not instantiate Capacitor's BridgeActivity or load MYFIN modules.
-CONTROL_APK="android/app/build/outputs/apk/debug/myfin-webview-control.apk"
 test -s "$CONTROL_APK"
 timeout 240s adb install -r "$CONTROL_APK"
 timeout 60s adb logcat -c
-timeout 120s adb shell am start -W -n com.myfin.app/.WebViewControlActivity
+timeout 120s adb shell am start -W -n org.myfin.webviewcontrol/.MainActivity
 control_seen=0
 for attempt in $(seq 1 60); do
   control_log="$(timeout 20s adb logcat -d -t 3000 2>/dev/null || true)"
@@ -53,7 +56,7 @@ for attempt in $(seq 1 60); do
     control_seen=1
     break
   fi
-  if [ "$attempt" -ge 5 ] && ! timeout 10s adb shell pidof com.myfin.app >/dev/null 2>&1; then
+  if [ "$attempt" -ge 5 ] && ! timeout 10s adb shell pidof "$CONTROL_PACKAGE" >/dev/null 2>&1; then
     break
   fi
   sleep 2
@@ -61,7 +64,7 @@ done
 if [ "$control_seen" -eq 1 ]; then
   echo "PASS: independent native WebView control JavaScript executed."
   sleep 10
-  if timeout 10s adb shell pidof com.myfin.app >/dev/null 2>&1; then
+  if timeout 10s adb shell pidof "$CONTROL_PACKAGE" >/dev/null 2>&1; then
     echo "PASS: control page renderer remained alive for 10 seconds."
   else
     echo "FAIL: control page process exited after JavaScript execution."
@@ -73,8 +76,8 @@ else
   diagnostic_snapshot "independent native WebView control failed before JS marker"
   exit 1
 fi
-timeout 60s adb shell am force-stop com.myfin.app
-timeout 180s adb uninstall com.myfin.app
+timeout 60s adb shell am force-stop "$CONTROL_PACKAGE"
+timeout 180s adb uninstall "$CONTROL_PACKAGE"
 echo "===== CONTROL PAGE COMPLETE; STARTING MYFIN SMOKE APK ====="
 
 wait_for_marker() {
