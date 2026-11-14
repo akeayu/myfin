@@ -1,0 +1,8 @@
+export type CurrencyCode = string & { readonly __currencyCode: unique symbol };
+export interface Money { readonly minorUnits: bigint; readonly currency: CurrencyCode; readonly scale: number }
+export function currencyCode(value: string): CurrencyCode { const v=value.trim().toUpperCase(); if(!/^[A-Z]{3}$/.test(v)) throw new Error("Currency must be a three-letter code."); return v as CurrencyCode; }
+export function money(minorUnits: bigint,currency:string,scale=2):Money { if(!Number.isInteger(scale)||scale<0||scale>6) throw new Error("Invalid currency scale."); return Object.freeze({minorUnits,currency:currencyCode(currency),scale}); }
+export function assertSameUnit(a:Money,b:Money):void { if(a.currency!==b.currency||a.scale!==b.scale) throw new Error("Money values must use the same currency and scale."); }
+export function addMoney(a:Money,b:Money):Money { assertSameUnit(a,b); return money(a.minorUnits+b.minorUnits,a.currency,a.scale); }
+export function subtractMoney(a:Money,b:Money):Money { assertSameUnit(a,b); return money(a.minorUnits-b.minorUnits,a.currency,a.scale); }
+export function parseDecimalAmount(value:string,currency:string,scale=2):Money { const m=/^(-?)(0|[1-9]\d*)(?:\.(\d+))?$/.exec(value.trim()); if(!m) throw new Error("Amount must be a plain decimal string."); const f=m[3]??""; if(f.length>scale) throw new Error("Amount exceeds currency precision."); const factor=10n**BigInt(scale); const unsigned=BigInt(m[2]!)*factor+BigInt((f+"0".repeat(scale)).slice(0,scale)||"0"); return money(m[1]==="-"?-unsigned:unsigned,currency,scale); }

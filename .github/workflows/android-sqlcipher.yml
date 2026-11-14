@@ -1,0 +1,83 @@
+name: MYFIN Android SQLite verification
+on:
+  push:
+    branches:
+      - feat/a3-financial-calendar-offline-iroka-foundation
+      - fix/a3-keystore-fail-closed-sidecar
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+concurrency:
+  group: myfin-android-sqlcipher-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  android-sqlcipher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run type and unit tests
+        run: npm run check
+      - name: Build Android smoke application
+        run: npm run build:android-smoke
+      - name: Generate Capacitor Android project
+        run: npx cap add android
+      - name: Disable automatic Android app-data backup
+        run: node scripts/patch-android-manifest.mjs
+      - name: Sync native Capacitor plugins
+        run: npx cap sync android
+      - name: Verify and record generated MainActivity compiled by Gradle
+        run: |
+          ACTIVITY=android/app/src/main/java/com/myfin/app/MainActivity.java
+          test -s "$ACTIVITY"
+          echo "===== GENERATED MAINACTIVITY.JAVA (APK BUILD INPUT) ====="
+          sha256sum "$ACTIVITY"
+          cat "$ACTIVITY"
+          grep -q 'NATIVE_ACTIVITY_ONCREATE' "$ACTIVITY"
+          grep -q 'NATIVE_ACTIVITY_ONRESUME' "$ACTIVITY"
+          echo "PASS: native Activity lifecycle markers are present in the Java source passed to Gradle."
+      - name: Build independent standalone WebView control APK
+        run: bash scripts/build-webview-control.sh
+      - name: Build debug APK
+        run: |
+          chmod +x android/gradlew
+          ./android/gradlew -p android app:assembleDebug
+      - name: Upload synthetic Android APK for physical-device verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: myfin-android-storage-smoke-apk
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            build/webview-control/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Test standalone WebView control on second emulator image/provider
+        timeout-minutes: 50
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          cores: 4
+          emulator-boot-timeout: 1800
+          ram-size: 4096M
+          heap-size: 512M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/verify-webview-control-only.sh
