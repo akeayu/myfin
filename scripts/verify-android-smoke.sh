@@ -22,9 +22,11 @@ wait_for_marker() {
     local log
     log="$(timeout 20s adb logcat -d -t 3000 2>/dev/null || true)"
     if grep -q "$marker" <<<"$log"; then set -x; return 0; fi
-    if grep -q "MYFIN_ANDROID_SMOKE:FAIL" <<<"$log" ||
-       grep -q "FATAL EXCEPTION" <<<"$log" ||
-       grep -q "Fatal signal" <<<"$log"; then
+    # Only fail immediately on an application-owned smoke failure marker.
+    # Android system services (for example Bluetooth/WebView) can emit native
+    # fatal-signal diagnostics on hosted emulators; those must not be attributed
+    # to MYFIN. Preserve them in timeout diagnostics instead.
+    if grep -q "MYFIN_ANDROID_SMOKE:FAIL" <<<"$log"; then
       set -x
       printf '%s\\n' "$log" | tail -n 350
       return 1
