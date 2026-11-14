@@ -10,6 +10,57 @@ BACKUP="/tmp/myfin-separate-install-backup.json"
 # emulator startup/install for a native SQLCipher failure.
 timeout 180s adb wait-for-device
 timeout 180s adb shell 'until [ "$(getprop sys.boot_completed)" = "1" ]; do sleep 2; done'
+
+diagnostic_snapshot() {
+  local reason="\${1:-diagnostic}"
+  set +x
+  echo "===== MYFIN ANDROID DIAGNOSTICS: $reason ====="
+  echo "===== DEVICE ====="
+  timeout 20s adb get-state 2>&1 || true
+  timeout 20s adb shell getprop sys.boot_completed 2>&1 || true
+  echo "===== PACKAGE INSTALLATION STATE ====="
+  timeout 20s adb shell pm path com.myfin.app 2>&1 || true
+  timeout 20s adb shell dumpsys package com.myfin.app 2>&1 | grep -E 'Package \[|versionCode=|versionName=|codePath=|userId=|enabled=' | head -n 40 || true
+  echo "===== PROCESS PID AND STATE ====="
+  timeout 20s adb shell pidof com.myfin.app 2>&1 || true
+  timeout 20s adb shell ps -A 2>&1 | grep -E 'com[.]myfin|webview|sandboxed_process' | tail -n 80 || true
+  echo "===== ACTIVITY / FOREGROUND ====="
+  timeout 20s adb shell dumpsys activity activities 2>&1 | grep -E 'mResumedActivity|topResumedActivity|com[.]myfin' | tail -n 100 || true
+  timeout 20s adb shell dumpsys window windows 2>&1 | grep -E 'mCurrentFocus|mFocusedApp|com[.]myfin' | tail -n 80 || true
+  echo "===== PROCESS EXIT HISTORY ====="
+  timeout 20s adb shell dumpsys activity exit-info com.myfin.app 2>&1 | tail -n 100 || true
+  echo "===== WEBVIEW PROVIDER ====="
+  timeout 20s adb shell dumpsys webviewupdate 2>&1 | tail -n 100 || true
+  echo "===== RUNTIME LOGCAT ====="
+  timeout 30s adb logcat -b all -d -v threadtime -t 12000 2>&1 | grep -E 'MYFIN_ANDROID_SMOKE|com[.]myfin|Capacitor|chromium|Cr_WebView|WebView|AndroidRuntime|FATAL EXCEPTION|ActivityTaskManager|ActivityManager|PluginManager|Console' | tail -n 1500 || true
+  echo "===== END DIAGNOSTICS ====="
+  set -x
+}
+
+wait_for_marker() {
+  local marker="$1"
+  set +x
+  for attempt in $(seq 1 180); do
+    local log
+    log="$(timeout 20s adb logcat -d -t 3000 2>/dev/null || true)"
+    if grep -q "$marker" <<<"$log"; then set -x; return 0; fi
+    if grep -q "MYFIN_ANDROID_SMOKE:FAIL" <<<"$log"; then
+      diagnostic_snapshot "application failure while waiting for $marker"
+      set -x
+      printf '%s\n' "$log" | tail -n 350
+      return 1
+    fi
+    sleep 2
+  done
+  local log
+  log="$(timeout 60s adb logcat -d -t 1500 2>/dev/null || true)"
+  diagnostic_snapshot "timeout waiting for $marker"
+  set -x
+  printf '%s\n' "$log" | tail -n 350
+  echo "Timed out waiting for $marker" >&2
+  return 1
+}
+
 set +e
 install_output="$(timeout 240s adb install -r "$APK" 2>&1)"
 install_rc=$?
