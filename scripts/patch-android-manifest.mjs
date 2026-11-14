@@ -65,7 +65,9 @@ for (const [name, marker] of lifecycle) {
       ? "        super." + name + "();\n        " + marker
       : "        " + marker + "\n        super." + name + "();";
     const method = "    @Override\n    public void " + name + "() {\n" + callback + "\n    }";
-    activity = activity.replace(/\n}\s*$/, "\n" + method + "\n}\n");
+    const classClose = activity.lastIndexOf("}");
+    if (classClose < 0) throw new Error("MainActivity closing brace not found.");
+    activity = activity.slice(0, classClose) + "\n" + method + "\n" + activity.slice(classClose);
   } else if (!activity.includes("NATIVE_ACTIVITY_" + name.toUpperCase())) {
     const methodStart = signature.exec(activity);
     const openBrace = activity.indexOf("{", methodStart.index) + 1;
