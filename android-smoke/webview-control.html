@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';" />
+    <title>MYFIN WebView control</title>
+  </head>
+  <body>
+    <main>
+      <h1>MYFIN WebView-only control</h1>
+      <pre id="status">MYFIN_WEBVIEW_CONTROL:HTML_LOADED</pre>
+    </main>
+    <script>
+      console.log("MYFIN_WEBVIEW_CONTROL_JS_EXECUTED");
+      document.getElementById("status").textContent = "MYFIN_WEBVIEW_CONTROL:JS_EXECUTED";
+    </script>
+  </body>
+</html>

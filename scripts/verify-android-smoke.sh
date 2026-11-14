@@ -39,6 +39,45 @@ diagnostic_snapshot() {
   set -x
 }
 
+# First run a static control page in the same generated native Activity and
+# emulator image. The page has only inline JavaScript: no Capacitor bridge,
+# MYFIN imports, SQLite, or Keystore code.
+CONTROL_APK="android/app/build/outputs/apk/debug/myfin-webview-control.apk"
+test -s "$CONTROL_APK"
+timeout 240s adb install -r "$CONTROL_APK"
+timeout 60s adb logcat -c
+timeout 120s adb shell am start -W -n com.myfin.app/.MainActivity
+control_seen=0
+for attempt in $(seq 1 60); do
+  control_log="$(timeout 20s adb logcat -d -t 3000 2>/dev/null || true)"
+  if grep -Fq "MYFIN_WEBVIEW_CONTROL_JS_EXECUTED" <<<"$control_log"; then
+    control_seen=1
+    break
+  fi
+  if [ "$attempt" -ge 5 ] && ! timeout 10s adb shell pidof com.myfin.app >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+if [ "$control_seen" -eq 1 ]; then
+  echo "PASS: minimal WebView-only control JavaScript executed."
+  sleep 10
+  if timeout 10s adb shell pidof com.myfin.app >/dev/null 2>&1; then
+    echo "PASS: control page renderer remained alive for 10 seconds."
+  else
+    echo "FAIL: control page process exited after JavaScript execution."
+    diagnostic_snapshot "minimal WebView control exited after JS execution"
+    exit 1
+  fi
+else
+  echo "FAIL: minimal WebView-only control did not execute JavaScript."
+  diagnostic_snapshot "minimal WebView control failed before JS marker"
+  exit 1
+fi
+timeout 60s adb shell am force-stop com.myfin.app
+timeout 180s adb uninstall com.myfin.app
+echo "===== CONTROL PAGE COMPLETE; STARTING MYFIN SMOKE APK ====="
+
 wait_for_marker() {
   local marker="$1"
   set +x
