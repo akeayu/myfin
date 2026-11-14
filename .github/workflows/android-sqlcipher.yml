@@ -41,6 +41,16 @@ jobs:
         run: node scripts/patch-android-manifest.mjs
       - name: Sync native Capacitor plugins
         run: npx cap sync android
+      - name: Verify and record generated MainActivity compiled by Gradle
+        run: |
+          ACTIVITY=android/app/src/main/java/com/myfin/app/MainActivity.java
+          test -s "$ACTIVITY"
+          echo "===== GENERATED MAINACTIVITY.JAVA (APK BUILD INPUT) ====="
+          sha256sum "$ACTIVITY"
+          cat "$ACTIVITY"
+          grep -q 'NATIVE_ACTIVITY_ONCREATE' "$ACTIVITY"
+          grep -q 'NATIVE_ACTIVITY_ONRESUME' "$ACTIVITY"
+          echo "PASS: native Activity lifecycle markers are present in the Java source passed to Gradle."
       - name: Build debug APK
         run: |
           chmod +x android/gradlew
