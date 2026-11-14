@@ -1,0 +1,49 @@
+name: MYFIN standalone WebView API 35 Play Store provider diagnostic
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/a3-keystore-fail-closed-sidecar
+    paths:
+      - .github/workflows/webview-api35-playstore-diagnostic.yml
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: myfin-webview-api35-playstore-diagnostic
+  cancel-in-progress: false
+jobs:
+  standalone-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout diagnostic scripts
+        uses: actions/checkout@v4
+      - name: Download exact standalone APK from run 185
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 43612791306 --repo "${GITHUB_REPOSITORY}" --name myfin-android-storage-smoke-apk --dir /tmp/run185-artifact
+          APK="$(find /tmp/run185-artifact -type f -path '*/webview-control/app/build/outputs/apk/debug/app-debug.apk' -print -quit)"
+          test -n "$APK"
+          mkdir -p build/webview-control/app/build/outputs/apk/debug
+          cp "$APK" build/webview-control/app/build/outputs/apk/debug/app-debug.apk
+          echo "===== RUN 185 APK SHA-256 ====="
+          sha256sum build/webview-control/app/build/outputs/apk/debug/app-debug.apk
+          echo "a703e0eba1ab53bec180b889c7095d1e2d85d9fd4dd3c31d478b10db39bde04e  build/webview-control/app/build/outputs/apk/debug/app-debug.apk" | sha256sum --check -
+      - name: Test exact APK on Android API 35 Google Play image
+        timeout-minutes: 45
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis_playstore
+          arch: x86_64
+          profile: pixel_6
+          cores: 2
+          emulator-boot-timeout: 1800
+          ram-size: 2048M
+          heap-size: 256M
+          disable-linux-hw-accel: true
+          disable-animations: true
+          emulator-options: -no-window -gpu off -noaudio -no-boot-anim -camera-back none -no-snapshot -wipe-data -no-metrics
+          script: bash scripts/verify-webview-control-only.sh
