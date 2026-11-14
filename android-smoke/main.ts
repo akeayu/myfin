@@ -25,6 +25,8 @@ function fail(message: string): never {
 async function run(): Promise<void> {
   checkpoint("RUN_ENTERED");
   if (Capacitor.getPlatform() !== "android") fail("Expected native Android platform.");
+  checkpoint("WEBVIEW_CAPACITOR_READY");
+  await smokeMarker.emit({ message: "NATIVE_PLUGIN_BRIDGE_READY" });
   const sqlite = CapacitorSQLite as unknown as SqliteBackupPort & {
     isDatabaseEncrypted(options: { database: string }): Promise<{ result: boolean }>;
     isDatabase(options: { database: string }): Promise<{ result: boolean }>;
