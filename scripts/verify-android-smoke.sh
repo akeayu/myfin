@@ -14,6 +14,28 @@ timeout 240s adb install -r "$APK"
 timeout 60s adb logcat -c
 timeout 120s adb shell am start -n com.myfin.app/.MainActivity
 
+diagnostic_snapshot() {
+  local reason="${1:-diagnostic}"
+  set +x
+  echo "===== MYFIN ANDROID DIAGNOSTICS: $reason ====="
+  echo "===== DEVICE ====="
+  timeout 20s adb get-state 2>&1 || true
+  timeout 20s adb shell getprop sys.boot_completed 2>&1 || true
+  echo "===== PROCESS ====="
+  timeout 20s adb shell pidof com.myfin.app 2>&1 || true
+  timeout 20s adb shell ps -A 2>&1 | grep -E 'com[.]myfin|webview|sandboxed_process' | tail -n 80 || true
+  echo "===== ACTIVITY ====="
+  timeout 20s adb shell dumpsys activity activities 2>&1 | grep -E 'mResumedActivity|topResumedActivity|com[.]myfin' | tail -n 100 || true
+  echo "===== WINDOW ====="
+  timeout 20s adb shell dumpsys window windows 2>&1 | grep -E 'mCurrentFocus|mFocusedApp|com[.]myfin' | tail -n 80 || true
+  echo "===== WEBVIEW PROVIDER ====="
+  timeout 20s adb shell dumpsys webviewupdate 2>&1 | tail -n 100 || true
+  echo "===== RUNTIME LOGCAT ====="
+  timeout 30s adb logcat -b all -d -v threadtime -t 12000 2>&1 | grep -E 'MYFIN_ANDROID_SMOKE|com[.]myfin|Capacitor|chromium|Cr_WebView|WebView|AndroidRuntime|FATAL EXCEPTION|ActivityTaskManager|ActivityManager|PluginManager|Console' | tail -n 1500 || true
+  echo "===== END DIAGNOSTICS ====="
+  set -x
+}
+
 wait_for_marker() {
   local marker="$1"
   # Avoid xtracing the captured logcat variable; it can be megabytes.
@@ -27,6 +49,7 @@ wait_for_marker() {
     # fatal-signal diagnostics on hosted emulators; those must not be attributed
     # to MYFIN. Preserve them in timeout diagnostics instead.
     if grep -q "MYFIN_ANDROID_SMOKE:FAIL" <<<"$log"; then
+      diagnostic_snapshot "application failure while waiting for $marker"
       set -x
       printf '%s\\n' "$log" | tail -n 350
       return 1
@@ -35,12 +58,17 @@ wait_for_marker() {
   done
   local log
   log="$(timeout 60s adb logcat -d -t 1500 2>/dev/null || true)"
+  diagnostic_snapshot "timeout waiting for $marker"
   set -x
   printf '%s\\n' "$log" | tail -n 350
   echo "Timed out waiting for $marker" >&2
   return 1
 }
 
+# First distinguish Activity startup, JavaScript entry and async execution.
+wait_for_marker "MYFIN_ANDROID_SMOKE:NATIVE_ACTIVITY_ONCREATE"
+wait_for_marker "MYFIN_ANDROID_SMOKE:JS_ENTRY_EXECUTED"
+wait_for_marker "MYFIN_ANDROID_SMOKE:CHECKPOINT RUN_ENTERED"
 # First installation creates an encrypted, portable backup in app-private files.
 wait_for_marker "MYFIN_ANDROID_SMOKE:ROTATION_PENDING"
 timeout 120s adb shell am force-stop com.myfin.app
