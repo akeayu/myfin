@@ -1,21 +1,20 @@
-import { Capacitor, registerPlugin } from "@capacitor/core";
-import { CapacitorSQLite } from "@capacitor-community/sqlite";
-import { CapacitorSqliteDatabase } from "../src/storage/capacitor.js";
-import { AndroidKeystoreSecretProvider } from "../src/security/android-keystore.js";
-import { MyfinEncryptedBackupService, type SqliteBackupPort } from "../src/security/encrypted-backup.js";
+import type { SqliteBackupPort } from "../src/security/encrypted-backup.js";
 
-const smokeMarker = registerPlugin<{ emit(options: { message: string }): Promise<void> }>("MyfinSmokeMarker");
+type SmokeMarker = { emit(options: { message: string }): Promise<void> };
+let smokeMarker: SmokeMarker | undefined;
+console.log("MYFIN_ANDROID_SMOKE_JS_BOOTSTRAP_EXECUTED");
 const status = document.querySelector<HTMLPreElement>("#status");
 function report(message: string): void {
   if (status) status.textContent = message;
   console.log(message);
-  void smokeMarker.emit({ message }).catch(error => {
-    console.error("MYFIN native smoke marker bridge unavailable", error);
-  });
+  if (smokeMarker) {
+    void smokeMarker.emit({ message }).catch(error => {
+      console.error("MYFIN native smoke marker bridge unavailable", error);
+    });
+  }
 }
 window.addEventListener("error", event => report("MYFIN_ANDROID_SMOKE:JS_WINDOW_ERROR " + (event.message || "unknown") + " " + (event.filename || "") + ":" + event.lineno));
 window.addEventListener("unhandledrejection", event => report("MYFIN_ANDROID_SMOKE:JS_UNHANDLED_REJECTION " + String(event.reason)));
-report("MYFIN_ANDROID_SMOKE:JS_ENTRY_EXECUTED");
 function checkpoint(name: string): void { report("MYFIN_ANDROID_SMOKE:CHECKPOINT " + name); }
 function fail(message: string): never {
   report("MYFIN_ANDROID_SMOKE:FAIL " + message);
@@ -23,6 +22,13 @@ function fail(message: string): never {
 }
 
 async function run(): Promise<void> {
+  const { Capacitor, registerPlugin } = await import("@capacitor/core");
+  smokeMarker = registerPlugin<SmokeMarker>("MyfinSmokeMarker");
+  report("MYFIN_ANDROID_SMOKE:JS_ENTRY_EXECUTED");
+  const { CapacitorSQLite } = await import("@capacitor-community/sqlite");
+  const { CapacitorSqliteDatabase } = await import("../src/storage/capacitor.js");
+  const { AndroidKeystoreSecretProvider } = await import("../src/security/android-keystore.js");
+  const { MyfinEncryptedBackupService } = await import("../src/security/encrypted-backup.js");
   checkpoint("RUN_ENTERED");
   if (Capacitor.getPlatform() !== "android") fail("Expected native Android platform.");
   checkpoint("WEBVIEW_CAPACITOR_READY");

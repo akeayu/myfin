@@ -103,6 +103,27 @@ if [ "$start_rc" -ne 0 ]; then
 fi
 wait_for_marker "MYFIN_ANDROID_SMOKE:NATIVE_ACTIVITY_ONCREATE"
 wait_for_marker "MYFIN_ANDROID_SMOKE:NATIVE_ACTIVITY_ONRESUME"
+wait_for_console_marker() {
+  local marker="$1"
+  set +x
+  for attempt in $(seq 1 180); do
+    local log
+    log="$(timeout 20s adb logcat -d -t 3000 2>/dev/null || true)"
+    if grep -Fq "$marker" <<<"$log"; then set -x; return 0; fi
+    if [ "$attempt" -ge 20 ] && ! timeout 10s adb shell pidof com.myfin.app >/dev/null 2>&1; then
+      diagnostic_snapshot "application process exited before JavaScript bootstrap marker"
+      set -x
+      echo "Application process exited before console marker: $marker" >&2
+      return 1
+    fi
+    sleep 2
+  done
+  diagnostic_snapshot "timeout waiting for JavaScript bootstrap console marker"
+  set -x
+  echo "Timed out waiting for console marker: $marker" >&2
+  return 1
+}
+wait_for_console_marker "MYFIN_ANDROID_SMOKE_JS_BOOTSTRAP_EXECUTED"
 wait_for_marker "MYFIN_ANDROID_SMOKE:JS_ENTRY_EXECUTED"
 wait_for_marker "MYFIN_ANDROID_SMOKE:CHECKPOINT WEBVIEW_CAPACITOR_READY"
 wait_for_marker "MYFIN_ANDROID_SMOKE:NATIVE_PLUGIN_BRIDGE_READY"
