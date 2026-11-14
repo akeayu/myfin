@@ -14,7 +14,7 @@ public class MyfinSmokeMarkerPlugin extends Plugin {
     public void emit(PluginCall call) {
         String message = call.getString("message", "");
         if (message.isEmpty() || message.length() > 512 ||
-            !message.matches("[A-Z0-9_ :.-]+")) {
+            !message.matches("[^\\r\\n]{1,512}")) {
             call.reject("Invalid MYFIN smoke marker.");
             return;
         }
