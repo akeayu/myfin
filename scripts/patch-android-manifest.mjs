@@ -3,15 +3,19 @@ import { dirname } from "node:path";
 
 const pluginSource = "native/android/MyfinKeyVaultPlugin.java";
 const pluginTarget = "android/app/src/main/java/com/myfin/app/MyfinKeyVaultPlugin.java";
+const smokePluginSource = "native/android/MyfinSmokeMarkerPlugin.java";
+const smokePluginTarget = "android/app/src/main/java/com/myfin/app/MyfinSmokeMarkerPlugin.java";
 await mkdir(dirname(pluginTarget), { recursive: true });
 await copyFile(pluginSource, pluginTarget);
+await copyFile(smokePluginSource, smokePluginTarget);
 
 const activityPath = "android/app/src/main/java/com/myfin/app/MainActivity.java";
 let activity = await readFile(activityPath, "utf8");
-if (!activity.includes("MyfinKeyVaultPlugin.class")) {
+if (!activity.includes("MyfinKeyVaultPlugin.class") || !activity.includes("MyfinSmokeMarkerPlugin.class")) {
   activity = activity.replace(
     /public class MainActivity extends BridgeActivity\s*\{/,
-    "public class MainActivity extends BridgeActivity {\n    @Override\n    public void onCreate(android.os.Bundle savedInstanceState) {\n        registerPlugin(MyfinKeyVaultPlugin.class);\n        super.onCreate(savedInstanceState);\n    }"
+    "public class MainActivity extends BridgeActivity {\n    @Override\n    public void onCreate(android.os.Bundle savedInstanceState) {\n        registerPlugin(MyfinKeyVaultPlugin.class);
+        registerPlugin(MyfinSmokeMarkerPlugin.class);\n        super.onCreate(savedInstanceState);\n    }"
   );
   await writeFile(activityPath, activity);
 }
