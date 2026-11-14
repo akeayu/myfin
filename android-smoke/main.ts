@@ -13,23 +13,32 @@ function report(message: string): void {
     console.error("MYFIN native smoke marker bridge unavailable", error);
   });
 }
+window.addEventListener("error", event => report("MYFIN_ANDROID_SMOKE:JS_WINDOW_ERROR " + (event.message || "unknown") + " " + (event.filename || "") + ":" + event.lineno));
+window.addEventListener("unhandledrejection", event => report("MYFIN_ANDROID_SMOKE:JS_UNHANDLED_REJECTION " + String(event.reason)));
+report("MYFIN_ANDROID_SMOKE:JS_ENTRY_EXECUTED");
+function checkpoint(name: string): void { report("MYFIN_ANDROID_SMOKE:CHECKPOINT " + name); }
 function fail(message: string): never {
   report("MYFIN_ANDROID_SMOKE:FAIL " + message);
   throw new Error(message);
 }
 
 async function run(): Promise<void> {
+  checkpoint("RUN_ENTERED");
   if (Capacitor.getPlatform() !== "android") fail("Expected native Android platform.");
   const sqlite = CapacitorSQLite as unknown as SqliteBackupPort & {
     isDatabaseEncrypted(options: { database: string }): Promise<{ result: boolean }>;
     isDatabase(options: { database: string }): Promise<{ result: boolean }>;
     deleteDatabase(options: { database: string }): Promise<void>;
   };
+  checkpoint("KEYVAULT_PROVIDER_CONSTRUCT_BEGIN");
   const keyVault = new AndroidKeystoreSecretProvider();
+  checkpoint("KEYVAULT_PROVIDER_CONSTRUCTED");
   const backupService = new MyfinEncryptedBackupService(sqlite, keyVault);
   const dbName = "myfin_android_smoke";
   const backupPassphrase = "synthetic-backup-passphrase-2026";
+  checkpoint("BACKUP_FILE_READ_BEGIN");
   const stagedBackup = await keyVault.readSmokeBackupFile();
+  checkpoint("BACKUP_FILE_READ_COMPLETE");
 
   // Second-install path: app data and Android Keystore namespace are new. Only
   // the encrypted backup file is carried across the uninstall/reinstall boundary.
@@ -80,7 +89,9 @@ async function run(): Promise<void> {
   }
 
 
+  checkpoint("PENDING_ROTATION_READ_BEGIN");
   const pending = await keyVault.getPendingDatabaseKeyRotation(dbName);
+  checkpoint("PENDING_ROTATION_READ_COMPLETE");
   if (pending.pending) {
     if (!pending.oldSecret || !pending.newSecret) fail("Pending rotation record is incomplete.");
     const recoveredDb = await CapacitorSqliteDatabase.open({ database: dbName, encrypted: true, encryptionSecretProvider: keyVault });
@@ -99,20 +110,28 @@ async function run(): Promise<void> {
 
   // First-install path: create synthetic data, verify rollback, rotate key, and
   // create the portable encrypted backup for the second installation.
+  checkpoint("KEYSTORE_GET_OR_CREATE_BEGIN");
   const originalSecret = await keyVault.getOrCreateSecret(dbName);
+  checkpoint("KEYSTORE_GET_OR_CREATE_COMPLETE");
   const recoveryPassphrase = "synthetic-recovery-passphrase-2026";
+  checkpoint("RECOVERY_EXPORT_BEGIN");
   const recoveryEnvelope = await keyVault.exportRecoveryEnvelope(recoveryPassphrase, dbName);
+  checkpoint("RECOVERY_EXPORT_COMPLETE");
   let wrongPassphraseRejected = false;
   try {
     await keyVault.restoreRecoveryEnvelope(recoveryEnvelope, "incorrect-recovery-passphrase", dbName);
   } catch { wrongPassphraseRejected = true; }
   if (!wrongPassphraseRejected) fail("Recovery envelope accepted an incorrect passphrase.");
+  checkpoint("RECOVERY_RESTORE_BEGIN");
   await keyVault.restoreRecoveryEnvelope(recoveryEnvelope, recoveryPassphrase, dbName);
+  checkpoint("RECOVERY_RESTORE_COMPLETE");
   if (await keyVault.getOrCreateSecret(dbName) !== originalSecret) fail("Recovery envelope did not preserve the original database key.");
 
+  checkpoint("SQLITE_OPEN_BEGIN");
   let db = await CapacitorSqliteDatabase.open({
     database: dbName, encrypted: true, mode: "secret", encryptionSecretProvider: keyVault
   });
+  checkpoint("SQLITE_OPEN_COMPLETE");
   await db.execute("CREATE TABLE IF NOT EXISTS smoke_records (id TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)");
   await db.run("INSERT OR REPLACE INTO smoke_records(id,value) VALUES(?,?)", ["committed", "MYFIN_ANDROID_SMOKE_SENTINEL"]);
   try {
@@ -126,17 +145,26 @@ async function run(): Promise<void> {
   }
   const inside = await db.query<{ id: string; value: string }>("SELECT id,value FROM smoke_records ORDER BY id");
   if (inside.length !== 1 || inside[0]?.id !== "committed") fail("Transaction rollback did not preserve only the committed row.");
+  checkpoint("SQLITE_TRANSACTION_ROLLBACK_VERIFIED");
   await db.close();
 
+  checkpoint("FAIL_CLOSED_CHECK_BEGIN");
   if (!(await keyVault.verifyMissingKeyFailsClosed(dbName))) fail("Missing active key was not rejected for an existing encrypted database.");
+  checkpoint("FAIL_CLOSED_CHECK_COMPLETE");
+  checkpoint("KEYSTORE_DIAGNOSTICS_BEGIN");
   const keystore = await keyVault.getKeystoreDiagnostics();
   report("MYFIN_ANDROID_SMOKE:KEYSTORE_DIAGNOSTICS " + JSON.stringify(keystore));
 
+  checkpoint("KEY_ROTATION_PREPARE_BEGIN");
   const stagedRotation = await keyVault.prepareDatabaseKeyRotation(dbName);
+  checkpoint("KEY_ROTATION_PREPARE_COMPLETE");
+  checkpoint("SQLCIPHER_REKEY_BEGIN");
   await sqlite.changeEncryptionSecret({ passphrase: stagedRotation.newSecret, oldpassphrase: stagedRotation.oldSecret });
+  checkpoint("SQLCIPHER_REKEY_COMPLETE");
   report("MYFIN_ANDROID_SMOKE:ROTATION_PENDING restart-required-before-keystore-promotion");
 }
 
+checkpoint("RUN_DISPATCHED");
 run().catch(error => {
   const message = error instanceof Error ? error.message : String(error);
   report("MYFIN_ANDROID_SMOKE:FAIL " + message);
