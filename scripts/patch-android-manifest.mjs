@@ -22,6 +22,7 @@ if (missingRegistrations.length > 0) {
   const onCreate = [
     "    @Override",
     "    public void onCreate(android.os.Bundle savedInstanceState) {",
+    "        android.util.Log.i(\"MYFIN_ANDROID_SMOKE\", \"NATIVE_ACTIVITY_ONCREATE\");",
     ...missingRegistrations,
     "        super.onCreate(savedInstanceState);",
     "    }"
