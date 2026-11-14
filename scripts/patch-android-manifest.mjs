@@ -25,10 +25,10 @@ if (missingRegistrations.length > 0) {
     ...missingRegistrations,
     "        super.onCreate(savedInstanceState);",
     "    }"
-  ].join("\\n");
-  const classPattern = /public class MainActivity extends BridgeActivity\\s*\\{/;
+  ].join("\n");
+  const classPattern = /public class MainActivity extends BridgeActivity\s*\{/;
   if (!classPattern.test(activity)) throw new Error("Capacitor MainActivity class declaration not found.");
-  activity = activity.replace(classPattern, match => match + "\\n" + onCreate);
+  activity = activity.replace(classPattern, match => match + "\n" + onCreate);
   await writeFile(activityPath, activity);
 }
 
