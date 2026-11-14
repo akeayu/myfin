@@ -15,25 +15,67 @@ const requiredRegistrations = [
   ["MyfinKeyVaultPlugin.class", "registerPlugin(MyfinKeyVaultPlugin.class);"],
   ["MyfinSmokeMarkerPlugin.class", "registerPlugin(MyfinSmokeMarkerPlugin.class);"]
 ];
-const missingRegistrations = requiredRegistrations
-  .filter(([className]) => !activity.includes(className))
-  .map(([, statement]) => "        " + statement);
-if (missingRegistrations.length > 0) {
-  const onCreate = [
+const classPattern = /public class MainActivity extends BridgeActivity\s*\{/;
+if (!classPattern.test(activity)) throw new Error("Capacitor MainActivity class declaration not found.");
+
+const onCreatePattern = /public\s+void\s+onCreate\s*\([^)]*\)\s*\{/;
+let onCreate = onCreatePattern.exec(activity);
+if (!onCreate) {
+  const generated = [
     "    @Override",
     "    public void onCreate(android.os.Bundle savedInstanceState) {",
-    "        android.util.Log.i(\"MYFIN_ANDROID_SMOKE\", \"NATIVE_ACTIVITY_ONCREATE\");",
-    ...missingRegistrations,
+    '        android.util.Log.i("MYFIN_ANDROID_SMOKE", "NATIVE_ACTIVITY_ONCREATE");',
+    ...requiredRegistrations.map(([, statement]) => "        " + statement),
     "        super.onCreate(savedInstanceState);",
     "    }"
   ].join("\n");
-  const classPattern = /public class MainActivity extends BridgeActivity\s*\{/;
-  if (!classPattern.test(activity)) throw new Error("Capacitor MainActivity class declaration not found.");
-  activity = activity.replace(classPattern, match => match + "\n" + onCreate);
-  await writeFile(activityPath, activity);
+  activity = activity.replace(classPattern, match => match + "\n" + generated);
+} else {
+  const bodyStart = onCreate.index + onCreate[0].length;
+  const insertions = [];
+  if (!activity.includes("NATIVE_ACTIVITY_ONCREATE")) {
+    insertions.push('        android.util.Log.i("MYFIN_ANDROID_SMOKE", "NATIVE_ACTIVITY_ONCREATE");');
+  }
+  for (const [className, statement] of requiredRegistrations) {
+    if (!activity.includes(className)) insertions.push("        " + statement);
+  }
+  if (insertions.length) {
+    const superCall = /super\s*\.\s*onCreate\s*\([^)]*\)\s*;/;
+    if (superCall.test(activity)) {
+      activity = activity.replace(superCall, match => insertions.join("\n") + "\n        " + match);
+    } else {
+      activity = activity.slice(0, bodyStart) + "\n" + insertions.join("\n") + activity.slice(bodyStart);
+    }
+  }
 }
 
-
+// These markers are emitted by Android Activity callbacks directly, independently
+// of Capacitor, WebView JavaScript, or plugin registration.
+const lifecycle = [
+  ["onStart", 'android.util.Log.i("MYFIN_ANDROID_SMOKE", "NATIVE_ACTIVITY_ONSTART");'],
+  ["onResume", 'android.util.Log.i("MYFIN_ANDROID_SMOKE", "NATIVE_ACTIVITY_ONRESUME");'],
+  ["onPause", 'android.util.Log.i("MYFIN_ANDROID_SMOKE", "NATIVE_ACTIVITY_ONPAUSE");'],
+  ["onStop", 'android.util.Log.i("MYFIN_ANDROID_SMOKE", "NATIVE_ACTIVITY_ONSTOP");'],
+  ["onDestroy", 'android.util.Log.i("MYFIN_ANDROID_SMOKE", "NATIVE_ACTIVITY_ONDESTROY");']
+];
+for (const [name, marker] of lifecycle) {
+  const signature = new RegExp("public\\s+void\\s+" + name + "\\s*\\(");
+  if (!signature.test(activity)) {
+    const callback = name === "onStart" || name === "onResume"
+      ? "        super." + name + "();\n        " + marker
+      : "        " + marker + "\n        super." + name + "();";
+    const method = "    @Override\n    public void " + name + "() {\n" + callback + "\n    }";
+    activity = activity.replace(/\n}\s*$/, "\n" + method + "\n}\n");
+  } else if (!activity.includes("NATIVE_ACTIVITY_" + name.toUpperCase())) {
+    const methodStart = signature.exec(activity);
+    const openBrace = activity.indexOf("{", methodStart.index) + 1;
+    activity = activity.slice(0, openBrace) + "\n        " + marker + activity.slice(openBrace);
+  }
+}
+await writeFile(activityPath, activity);
+console.log("MYFIN generated MainActivity.java after patching:");
+console.log(activity);
+console.log("PASS: onCreate marker insertion is unconditional and plugin-registration independent.");
 
 const appGradlePath = "android/app/build.gradle";
 let appGradle = await readFile(appGradlePath, "utf8");
