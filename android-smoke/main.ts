@@ -1,13 +1,17 @@
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { CapacitorSQLite } from "@capacitor-community/sqlite";
 import { CapacitorSqliteDatabase } from "../src/storage/capacitor.js";
 import { AndroidKeystoreSecretProvider } from "../src/security/android-keystore.js";
 import { MyfinEncryptedBackupService, type SqliteBackupPort } from "../src/security/encrypted-backup.js";
 
+const smokeMarker = registerPlugin<{ emit(options: { message: string }): Promise<void> }>("MyfinSmokeMarker");
 const status = document.querySelector<HTMLPreElement>("#status");
 function report(message: string): void {
   if (status) status.textContent = message;
   console.log(message);
+  void smokeMarker.emit({ message }).catch(error => {
+    console.error("MYFIN native smoke marker bridge unavailable", error);
+  });
 }
 function fail(message: string): never {
   report("MYFIN_ANDROID_SMOKE:FAIL " + message);
