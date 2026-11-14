@@ -39,14 +39,13 @@ diagnostic_snapshot() {
   set -x
 }
 
-# First run a static control page in the same generated native Activity and
-# emulator image. The page has only inline JavaScript: no Capacitor bridge,
-# MYFIN imports, SQLite, or Keystore code.
+# First run a native Activity that uses android.webkit.WebView directly.
+# It does not instantiate Capacitor's BridgeActivity or load MYFIN modules.
 CONTROL_APK="android/app/build/outputs/apk/debug/myfin-webview-control.apk"
 test -s "$CONTROL_APK"
 timeout 240s adb install -r "$CONTROL_APK"
 timeout 60s adb logcat -c
-timeout 120s adb shell am start -W -n com.myfin.app/.MainActivity
+timeout 120s adb shell am start -W -n com.myfin.app/.WebViewControlActivity
 control_seen=0
 for attempt in $(seq 1 60); do
   control_log="$(timeout 20s adb logcat -d -t 3000 2>/dev/null || true)"
@@ -60,18 +59,18 @@ for attempt in $(seq 1 60); do
   sleep 2
 done
 if [ "$control_seen" -eq 1 ]; then
-  echo "PASS: minimal WebView-only control JavaScript executed."
+  echo "PASS: independent native WebView control JavaScript executed."
   sleep 10
   if timeout 10s adb shell pidof com.myfin.app >/dev/null 2>&1; then
     echo "PASS: control page renderer remained alive for 10 seconds."
   else
     echo "FAIL: control page process exited after JavaScript execution."
-    diagnostic_snapshot "minimal WebView control exited after JS execution"
+    diagnostic_snapshot "independent native WebView control exited after JS execution"
     exit 1
   fi
 else
-  echo "FAIL: minimal WebView-only control did not execute JavaScript."
-  diagnostic_snapshot "minimal WebView control failed before JS marker"
+  echo "FAIL: independent native WebView control did not execute JavaScript."
+  diagnostic_snapshot "independent native WebView control failed before JS marker"
   exit 1
 fi
 timeout 60s adb shell am force-stop com.myfin.app
