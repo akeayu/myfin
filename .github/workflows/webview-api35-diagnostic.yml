@@ -46,5 +46,5 @@ jobs:
           heap-size: 256M
           disable-linux-hw-accel: true
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot -wipe-data -no-metrics
+          emulator-options: -no-window -gpu off -noaudio -no-boot-anim -camera-back none -no-snapshot -wipe-data -no-metrics
           script: bash scripts/verify-webview-control-only.sh
