@@ -31,8 +31,10 @@ diagnostic_snapshot() {
   timeout 20s adb shell dumpsys activity exit-info com.myfin.app 2>&1 | tail -n 100 || true
   echo "===== WEBVIEW PROVIDER ====="
   timeout 20s adb shell dumpsys webviewupdate 2>&1 | tail -n 100 || true
+  echo "===== CRASH BUFFER ====="
+  timeout 30s adb logcat -b crash -d -v threadtime 2>&1 | tail -n 300 || true
   echo "===== RUNTIME LOGCAT ====="
-  timeout 30s adb logcat -b all -d -v threadtime -t 12000 2>&1 | grep -E 'MYFIN_ANDROID_SMOKE|com[.]myfin|Capacitor|chromium|Cr_WebView|WebView|AndroidRuntime|FATAL EXCEPTION|ActivityTaskManager|ActivityManager|PluginManager|Console' | tail -n 1500 || true
+  timeout 30s adb logcat -b all -d -v threadtime -t 12000 2>&1 | grep -E 'MYFIN_ANDROID_SMOKE|com[.]myfin|Capacitor|chromium|Cr_WebView|WebView|AndroidRuntime|FATAL EXCEPTION|ActivityTaskManager|ActivityManager|PluginManager|Console|libc|DEBUG|crash_dump|tombstoned|SIG(SEGV|ABRT|BUS)|SQLite|sqlite|linker' | tail -n 2000 || true
   echo "===== END DIAGNOSTICS ====="
   set -x
 }
@@ -43,11 +45,22 @@ wait_for_marker() {
   for attempt in $(seq 1 180); do
     local log
     log="$(timeout 20s adb logcat -d -t 3000 2>/dev/null || true)"
-    if grep -q "$marker" <<<"$log"; then set -x; return 0; fi
-    if grep -q "MYFIN_ANDROID_SMOKE:FAIL" <<<"$log"; then
+    # Android logcat renders the tag and message as "TAG: MESSAGE"; the
+    # requested marker uses "TAG:MESSAGE". Normalize that separator before
+    # matching so a real native lifecycle event cannot be missed.
+    local logcat_marker="${marker/:/: }"
+    if grep -Fq "$logcat_marker" <<<"$log"; then set -x; return 0; fi
+    if grep -Fq "MYFIN_ANDROID_SMOKE: FAIL" <<<"$log"; then
       diagnostic_snapshot "application failure while waiting for $marker"
       set -x
       printf '%s\n' "$log" | tail -n 350
+      return 1
+    fi
+    if [ "$attempt" -ge 20 ] && ! timeout 10s adb shell pidof com.myfin.app >/dev/null 2>&1; then
+      diagnostic_snapshot "application process exited while waiting for $marker"
+      set -x
+      printf '%s\n' "$log" | tail -n 350
+      echo "Application process exited before marker: $marker" >&2
       return 1
     fi
     sleep 2
